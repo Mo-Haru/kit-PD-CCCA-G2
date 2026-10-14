@@ -30,80 +30,76 @@ LINE API を使うかどうかは未決定です。
 - コード共有は GitHub（このリポジトリ）
 - アプリ生成は `create_app` にまとめる
 - `db` は `app/extensions.py` で定義し、`db.init_app` で初期化する
+- Python は 3.14 系。`Pipfile` の `python_version` に合わせる
+- 依存管理は Pipenv。`requirements.txt`、Poetry、uv は併用しない
 
 ### 暫定（本番の決定ではない）
 
 | 項目 | 暫定の内容 | 判断理由 |
 | --- | --- | --- |
-| Python | 3.12 系 | 既存のバージョン指定がなかった。Flask 3.1.3 は Python 3.9 以上で動く。確認に使った環境が Python 3.12.3 だったため、チームの基準も 3.12 系にした。 |
-| 仮想環境と依存管理 | 標準ライブラリの `venv` と `requirements.txt` | 既存の Pipenv、Poetry、uv の設定がなかった。管理方法を一つにするため、それらを追加していない。 |
 | データベース | SQLite（`instance/dev.db`） | 既存の接続設定がなかった。追加の DB ソフトなしで、ローカルの起動確認ができる。 |
 | 秘密情報 | 開発用のダミー `dev-change-me` | 外部サービスの鍵はまだ無い。鍵が無くてもこの土台は起動できる。この値は本番の秘密鍵ではない。 |
 | 業務モデル | まだ作らない | テーブル設計が未確定。回答本文をサーバーが読める列にすると、方針と矛盾する。 |
 
-依存ライブラリのバージョンは `requirements.txt` に固定しています。直接使うものは Flask 3.1.3、Flask-SQLAlchemy 3.1.1、python-dotenv 1.2.4、pytest 9.1.1 です。
+直接使うライブラリのバージョンは `Pipfile` に固定しています。Flask 3.1.3、Flask-SQLAlchemy 3.1.1、python-dotenv 1.2.4、開発用の pytest 9.1.1 です。`Pipfile.lock` は既存の `.gitignore` で除外したままにしています。ロックファイルを共有するかは、まだ決めていません。
 
 ## Windows で必要なソフト
 
 | ソフト | バージョン | 用途 |
 | --- | --- | --- |
 | Git | 2 系 | リポジトリの取得、ブランチ、Pull Request |
-| Python | 3.12 系（暫定） | アプリの実行。インストール時に Python launcher（`py`）を有効にする |
+| Python | 3.14 系 | アプリの実行。インストール時に Python launcher（`py`）を有効にする |
+| Pipenv | `py -3.14 -m pip install --user pipenv` で入る版 | 仮想環境と依存関係。初回起動の手順で入れる |
 | Web ブラウザ | HTML を表示できるもの | 画面の確認。パスキー用のブラウザ要件は未決定 |
 
-Python は [python.org の 3.12 系](https://www.python.org/downloads/) を使ってください。確認済みのパッチ番号は、この README 末尾の「動作確認した環境」だけです。
+Python は [python.org の 3.14 系](https://www.python.org/downloads/) を使ってください。確認済みのパッチ番号は、この README 末尾の「動作確認した環境」だけです。
 
 次のコマンドでバージョンを確認します。
 
 ```powershell
 git --version
 py -0p
-py -3.12 --version
+py -3.14 --version
 ```
 
-`py` が無い場合は、Python のインストール時に launcher を外していないか確認し、代わりに `python --version` を見てください。3.12 系でない場合は、3.12 系を入れてから進めてください。
+`py` が無い場合は、Python のインストール時に launcher を外していないか確認し、代わりに `python --version` を見てください。3.14 系でない場合は、3.14 系を入れてから進めてください。
 
 ## 初回起動（PowerShell）
 
-リポジトリのフォルダで実行します。仮想環境の `Activate.ps1` は使わなくて構いません。
+リポジトリのフォルダで実行します。`pipenv run` は仮想環境を有効化しなくても使えます。
 
 ```powershell
 git clone https://github.com/Mo-Haru/kit-PD-CCCA-G2.git
 cd kit-PD-CCCA-G2
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+py -3.14 -m pip install --user pipenv
+py -3.14 -m pipenv install --dev
 Copy-Item .env.example .env
-.\.venv\Scripts\python.exe -m flask --app run init-db
-.\.venv\Scripts\python.exe -m flask --app run run --debug
+py -3.14 -m pipenv run python -m flask --app run init-db
+py -3.14 -m pipenv run python -m flask --app run run --debug
 ```
 
-`py` が使えない場合は、先頭の仮想環境作成だけ次に置き換えます。
-
-```powershell
-python -m venv .venv
-```
+`py -3.14 -m pipenv` が使えない場合は、`pipenv` が PATH にあることを確認して、`pipenv` だけに置き換えてください。
 
 `.env` のコピーは省略できます。省略しても、開発用の暫定値（SQLite とダミーの `SECRET_KEY`）で起動します。設定を変えるときだけ `.env` を編集します。`.env.example` に秘密情報は入っていません。
 
 `init-db` は、登録済みモデルのテーブルを作ります。現時点では業務用モデルが無いため、接続の確認と、以後モデルを足したときの手順として実行します。既存のテーブルや行は削除しません。このコマンドを二回実行しても、既存データは消えません。
 
-仮想環境を有効にしてから同じコマンドを短くすることもできます。
+仮想環境を有効にしてから短くすることもできます。
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
+py -3.14 -m pipenv shell
 python -m flask --app run init-db
 python -m flask --app run run --debug
 ```
 
-`Activate.ps1` が実行ポリシーで止まった場合は、ポリシーを変更せず、上の `.\.venv\Scripts\python.exe -m ...` の形を使ってください。
+`pipenv shell` が実行ポリシーで止まった場合は、ポリシーを変更せず、上の `pipenv run` の形を使ってください。
 
 サーバーを止めるときは、そのウィンドウで Ctrl+C を押します。
 
 起動したままテストする場合は、別の PowerShell を開いてリポジトリのフォルダへ移動し、次を実行します。
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest
+py -3.14 -m pipenv run python -m pytest
 ```
 
 ## 起動できたかの確認
@@ -116,6 +112,7 @@ python -m flask --app run run --debug
 | http://127.0.0.1:5000/answers | 「未実装」と表示され、保存は実行できない |
 | http://127.0.0.1:5000/sharing | 「未実装」と表示され、共有操作は実行できない |
 | http://127.0.0.1:5000/auth | 「未実装」と表示され、ログインした状態にならない |
+| http://127.0.0.1:5000/hello | 文字列 `Hello, World!` |
 | http://127.0.0.1:5000/health | JSON で `status` と `database` がどちらも `ok` |
 
 画面上部に、保存・認証・暗号化・共有が未実装である旨が出ます。未実装のボタンは押せません。認証できたように見せる画面や、暗号化できたように見せる処理はありません。
@@ -123,7 +120,7 @@ python -m flask --app run run --debug
 ポート 5000 が使用中のときは、次でポートを変えます。
 
 ```powershell
-.\.venv\Scripts\python.exe -m flask --app run run --debug --port 5001
+py -3.14 -m pipenv run python -m flask --app run run --debug --port 5001
 ```
 
 その場合の URL は `http://127.0.0.1:5001/` です。
@@ -139,19 +136,21 @@ app/
   __init__.py          create_app、Blueprint 登録、init-db、404
   extensions.py        Flask-SQLAlchemy の db
   blueprints/          機能ごとのルート
-    main.py            ホームと /health
+    main.py            ホーム、/hello、/health
     answers.py         回答
     sharing.py         共有
     auth.py            認証
-  models/              DB モデル。業務モデルはまだ無い
+  models/              DB モデル。user.py はコメントだけの下書き
   templates/           共通レイアウトと各画面
   static/css/          共通の CSS
 config.py              開発用設定とテスト用設定
 run.py                 起動用のアプリオブジェクト
-requirements.txt       固定した依存関係
+Pipfile                Pipenv の依存関係。Python 3.14
 .env.example           秘密情報を含まない設定例
 tests/                 起動、ルート、DB 接続の確認
 ```
+
+最初の `app.py` は `app/` パッケージと同時に置けないため削除しました。`Hello, World!` は `http://127.0.0.1:5000/hello` で返します。ルートの `models.py` にあったコメントの下書きは `app/models/user.py` に移しています。クラスはコメントのままなので、テーブルは作られません。
 
 `app/services/` はまだ作りません。ルートから呼び出す処理をファイルに分けたくなった時点で、例えば `app/services/answers.py` を追加します。最初から層を増やさないでください。
 
@@ -159,7 +158,7 @@ tests/                 起動、ルート、DB 接続の確認
 
 ## 画面、Blueprint、モデルの追加
 
-コマンドは、リポジトリのフォルダで `.\.venv\Scripts\python.exe -m ...` を使う前提です。
+コマンドは、リポジトリのフォルダで `py -3.14 -m pipenv run python -m ...` を使う前提です。
 
 ### 画面と Blueprint
 
@@ -198,7 +197,7 @@ app.register_blueprint(feature_bp)
 3. 次を実行する。既存データは削除されません。
 
 ```powershell
-.\.venv\Scripts\python.exe -m flask --app run init-db
+py -3.14 -m pipenv run python -m flask --app run init-db
 ```
 
 回答本文の列は、ブラウザ側の暗号化方式が決まるまで作りません。サーバーが内容を読める保存やログは、方針と矛盾します。
@@ -226,21 +225,20 @@ app.register_blueprint(feature_bp)
 - `app/extensions.py`
 - `config.py`
 - `run.py`
-- `requirements.txt`
+- `Pipfile`
 - `app/templates/base.html`
 - `app/static/css/style.css`
 - `.gitignore`
 - `.env.example`
 - この README の起動手順
 
-依存を追加するときも、管理方法は `requirements.txt` だけにします。Pipenv、Poetry、uv を併用しないでください。追加後は、使った環境で次を実行し、差分を確認してからコミットします。
+依存を追加するときは `Pipfile` だけを更新します。`requirements.txt`、Poetry、uv を併用しないでください。バージョンを指定して入れ、変更された `Pipfile` をコミットします。
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install 追加するパッケージ
-.\.venv\Scripts\python.exe -m pip freeze > requirements.txt
+py -3.14 -m pipenv install 追加するパッケージ==バージョン
 ```
 
-`pip freeze` は、今の仮想環境に入っているものへ一覧を置き換えます。仮想環境を新しく作り、`requirements.txt` だけから入れ直した状態で実行してください。
+開発用のツールは `pipenv install --dev` を使います。`Pipfile.lock` は、いまの `.gitignore` ではコミットしません。
 
 やってはいけないことは次のとおりです。
 
@@ -290,8 +288,7 @@ push のあと、GitHub のリポジトリページで **Compare & pull request*
 | 回答更新の自動反映 | 採用しない方針 | なし | 自動反映する処理は追加しない |
 | LINE API | 未決定 | 使うと決まってから `app/services/line.py` | 使うかどうか、アカウント、メッセージに載せる範囲 |
 | 本番データベース | 未決定 | `DATABASE_URL` と `config.py` | 製品、接続情報の渡し方、バックアップ |
-| Python のバージョン | 3.12 系で暫定 | `.python-version`、この README | 3.12 のままにするか |
-| 依存管理ツール | venv + requirements で暫定 | `requirements.txt` | この方式のままにするか |
+| Pipfile.lock を共有するか | 既存の `.gitignore` では除外 | `Pipfile` に直接依存のバージョンは固定済み | ロックファイルもコミットするか |
 | 公開方法 | 未決定 | なし | ホスティング。この土台にはデプロイ設定を置いていない |
 
 LINE、パスキー、暗号化、QR のライブラリや鍵は、今回の起動には不要です。
@@ -312,12 +309,12 @@ LINE、パスキー、暗号化、QR のライブラリや鍵は、今回の起�
 
 ## 動作確認した環境
 
-次の確認は Linux 上の Python 3.12.3 で行いました。画面のクリック確認は、同じ Linux 上の Chrome で行いました。Windows での起動確認はまだです。PowerShell のパス（`.venv\Scripts\python.exe`）は Windows の venv の形であり、この Linux 環境では `.venv/bin/python` に読み替えて確認しています。
+次の確認は Linux 上の Python 3.14.8 と Pipenv で行いました。Windows での起動確認はまだです。PowerShell の `py -3.14 -m pipenv run` は、この Linux 環境では `python3.14 -m pipenv run` に読み替えて確認しています。
 
-- 新しい仮想環境へ `requirements.txt` をインストールできる
+- 新しい Pipenv 環境へ `Pipfile` の依存関係をインストールできる
 - `init-db` のあと、アプリを起動できる
-- ホーム、回答、共有、認証、`/health` を表示できる
+- ホーム、`/hello`、回答、共有、認証、`/health` を表示できる
 - SQLite へ接続でき、`init-db` は既存の行を削除しない
 - `pytest` が成功する
 
-Windows でまだ見るものは、`py -3.12` の有無、`Activate.ps1` の実行ポリシー、コンソールの文字コード、ブラウザでの画面表示です。起動そのものは、Activate を使わない `Scripts\python.exe` のコマンドで確認できます。
+Windows でまだ見るものは、`py -3.14` の有無、`pipenv` のインストール、コンソールの文字コード、ブラウザでの画面表示です。起動そのものは、`pipenv shell` を使わない `pipenv run` のコマンドで確認できます。

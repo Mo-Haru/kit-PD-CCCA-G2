@@ -2,6 +2,12 @@ FEATURE_PAGES = ("/answers", "/sharing", "/auth")
 FORBIDDEN_PHRASES = ("ログインしました", "保存しました", "暗号化しました", "共有しました")
 
 
+def test_legacy_hello_still_responds(client):
+    response = client.get("/hello")
+    assert response.status_code == 200
+    assert response.get_data(as_text=True) == "Hello, World!"
+
+
 def test_home_explains_the_foundation(client):
     response = client.get("/")
     body = response.get_data(as_text=True)

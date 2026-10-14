@@ -3,6 +3,9 @@
 venv/
 env/
 
+# Pipenv のロックファイル。既存の設定で Git から除外する
+Pipfile.lock
+
 # 秘密情報
 .env
 

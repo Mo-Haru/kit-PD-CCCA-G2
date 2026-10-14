@@ -8,3 +8,7 @@
 init-db は、ここで import されたモデルのテーブルを作る。
 既存のテーブルや行は削除しない。
 """
+
+# コメントだけの下書き。有効なモデル定義はまだ無い。
+from app.models import user  # noqa: F401
+
