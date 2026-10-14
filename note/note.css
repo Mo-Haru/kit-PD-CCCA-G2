@@ -1,0 +1,437 @@
+/* =====================================================================
+   note.css ： 「わたしノート・進捗表示画面」のスタイル
+   ---------------------------------------------------------------------
+   【デザイン方針】
+   ・スマホ（幅360px前後）で見ることを最優先にした作り
+   ・高齢者にも読みやすいよう、文字は大きめ（本文18px〜）・行間ゆったり
+   ・青と白を基調にした、落ち着いて安心できる配色
+   ・文字色と背景色のコントラストを十分に確保（読みやすさ重視）
+
+   【結合するときのメモ】
+   ・クラス名はすべて「note-」で始めています（他画面とのCSS衝突を防ぐため）
+   ・色・文字サイズ・余白は、下の :root の変数を変えるだけで全体に反映されます
+   ===================================================================== */
+
+
+/* ---------------------------------------------------------------------
+   1. 色・サイズの設定（変数）
+   他メンバーのCSSと色をそろえたいときは、ここの値だけ直してください。
+   --------------------------------------------------------------------- */
+:root {
+  /* 色 */
+  --note-navy:       #123A66;  /* 文字色（濃い紺）*/
+  --note-blue:       #1F6BB8;  /* メインの青（ヘッダー・進捗バー）*/
+  --note-blue-deep:  #174E88;  /* 濃い青（強調）*/
+  --note-sky:        #EDF4FB;  /* ページ全体の背景（ごく薄い水色）*/
+  --note-sky-strong: #DCEAF8;  /* 回答の吹き出し・バーの背景 */
+  --note-line:       #B9D1EA;  /* 枠線 */
+  --note-white:      #FFFFFF;  /* 白 */
+  --note-muted:      #44627F;  /* 補足の文字色（日付など）*/
+
+  /* 文字サイズ（高齢者向けに大きめ）*/
+  --note-fs-base:    1.125rem;   /* 本文 18px */
+  --note-fs-small:   1rem;       /* 補足 16px（これより小さくしない）*/
+  --note-fs-card:    1.25rem;    /* カードの見出し 20px */
+  --note-fs-title:   2rem;       /* 画面タイトル 32px */
+  --note-fs-percent: 3.25rem;    /* パーセントの大きい数字 52px */
+
+  /* 角丸 */
+  --note-radius-card:   18px;
+  --note-radius-bubble: 14px;
+}
+
+
+/* ---------------------------------------------------------------------
+   2. 全体の基本設定
+   --------------------------------------------------------------------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box; /* 余白や枠線を含めて幅を計算する */
+}
+
+.note-body {
+  margin: 0;
+  background: var(--note-sky);
+  color: var(--note-navy);
+  /* BIZ UDPGothic が読み込めない場合は、端末にある日本語フォントを順に使う */
+  font-family: "BIZ UDPGothic", "Hiragino Sans", "Hiragino Kaku Gothic ProN",
+               "Yu Gothic UI", "Meiryo", sans-serif;
+  font-size: var(--note-fs-base);
+  line-height: 1.8;
+  -webkit-text-size-adjust: 100%; /* iPhoneで横向きにしても文字が勝手に拡大されない */
+}
+
+/* ページ全体の入れ物：スマホでは画面いっぱい、PCでは中央に細く表示 */
+.note-page {
+  max-width: 640px;
+  margin: 0 auto;
+  min-height: 100vh;
+  background: var(--note-sky);
+}
+
+/* キーボードで操作したときの枠線（今後ボタンを足したときのため）*/
+.note-page :focus-visible {
+  outline: 3px solid var(--note-blue-deep);
+  outline-offset: 3px;
+}
+
+
+/* ---------------------------------------------------------------------
+   3. ヘッダー（青い帯）
+   iPhoneのノッチ部分に文字が重ならないよう safe-area も考慮
+   --------------------------------------------------------------------- */
+.note-header {
+  background: var(--note-blue);
+  color: var(--note-white);
+  padding: calc(28px + env(safe-area-inset-top, 0px)) 20px 32px;
+  /* 下側だけ丸くして、やわらかい印象に */
+  border-radius: 0 0 28px 28px;
+}
+
+.note-title {
+  margin: 0;
+  font-size: var(--note-fs-title);
+  line-height: 1.3;
+  letter-spacing: 0.04em;
+}
+
+.note-lead {
+  margin: 8px 0 0;
+  font-size: var(--note-fs-base);
+}
+
+
+/* ---------------------------------------------------------------------
+   4. メイン部分の余白
+   --------------------------------------------------------------------- */
+.note-main {
+  padding: 20px 16px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px; /* ブロックどうしの間隔 */
+}
+
+/* 白いカードの共通スタイル（進捗カードで使用）*/
+.note-card {
+  background: var(--note-white);
+  border: 1px solid var(--note-line);
+  border-radius: var(--note-radius-card);
+  padding: 22px 20px;
+}
+
+.note-card-title {
+  margin: 0;
+  font-size: var(--note-fs-card);
+  line-height: 1.5;
+}
+
+
+/* ---------------------------------------------------------------------
+   5. 進捗バー
+   --------------------------------------------------------------------- */
+/* 「60% 完了」の大きな表示 */
+.note-progress-percent {
+  margin: 8px 0 12px;
+  line-height: 1.2;
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+.note-progress-number {
+  font-size: var(--note-fs-percent);
+  font-weight: 700;
+  color: var(--note-blue-deep);
+}
+
+.note-progress-unit {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--note-blue-deep);
+}
+
+.note-progress-done {
+  margin-left: 10px;
+  font-size: var(--note-fs-card);
+  font-weight: 700;
+}
+
+/* バーの外側（うすい水色の溝）*/
+.note-bar {
+  height: 26px;               /* 太めにして見やすく */
+  background: var(--note-sky-strong);
+  border-radius: 999px;
+  overflow: hidden;           /* 中の青いバーを角丸の内側におさめる */
+}
+
+/* バーの中身（青い部分）。幅は note.js が % で指定します */
+.note-bar-fill {
+  width: 0;                   /* 初期値。JSで書き換わる */
+  height: 100%;
+  background: var(--note-blue);
+  border-radius: 999px;
+  transition: width 0.9s ease-out; /* 読み込み時にスーッと伸びる */
+}
+
+.note-progress-text {
+  margin: 12px 0 0;
+  font-size: var(--note-fs-base);
+}
+
+
+/* ---------------------------------------------------------------------
+   6. 「暗号化して保存済み」の表示
+   --------------------------------------------------------------------- */
+.note-secure {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 20px;
+  background: var(--note-white);
+  border: 2px solid var(--note-blue);   /* 太い青枠で「安心」を目立たせる */
+  border-radius: var(--note-radius-card);
+}
+
+/* 鍵アイコンの青い丸 */
+.note-secure-icon {
+  flex: 0 0 auto;             /* 画面が狭くても丸がつぶれない */
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--note-blue);
+  color: var(--note-white);
+}
+
+.note-secure-title {
+  margin: 0;
+  font-size: var(--note-fs-card);
+  line-height: 1.4;
+  color: var(--note-blue-deep);
+}
+
+.note-secure-text {
+  margin: 4px 0 0;
+  font-size: var(--note-fs-small);
+  line-height: 1.6;
+}
+
+
+/* ---------------------------------------------------------------------
+   7. わたしノート（質問と回答の履歴リスト）
+   --------------------------------------------------------------------- */
+.note-section-title {
+  margin: 8px 4px 12px;
+  font-size: 1.5rem;
+  line-height: 1.4;
+}
+
+/* リストの黒点を消して、縦に並べる */
+.note-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* 1件ぶんのカード */
+.note-item {
+  background: var(--note-white);
+  border: 1px solid var(--note-line);
+  border-radius: var(--note-radius-card);
+  padding: 20px;
+}
+
+/* 回答した日付 */
+.note-item-date {
+  margin: 0 0 8px;
+  font-size: var(--note-fs-small);
+  color: var(--note-muted);
+}
+
+/* 質問文（左に青い線を引いて「質問」だと分かるように）*/
+.note-question {
+  margin: 0 0 16px;
+  padding-left: 14px;
+  border-left: 5px solid var(--note-blue);
+  font-size: 1.25rem;
+  line-height: 1.6;
+}
+
+/* 「あなたの答え」のラベル */
+.note-answer-label {
+  margin: 0 0 6px;
+  font-size: var(--note-fs-small);
+  font-weight: 700;
+  color: var(--note-blue-deep);
+}
+
+/* 回答の吹き出し */
+.note-answer {
+  margin: 0;
+  padding: 14px 16px;
+  background: var(--note-sky-strong);
+  border-radius: var(--note-radius-bubble);
+  line-height: 1.9;
+}
+
+/* 質問が0件のときのメッセージ */
+.note-empty {
+  padding: 24px 20px;
+  background: var(--note-white);
+  border: 1px dashed var(--note-line);
+  border-radius: var(--note-radius-card);
+  text-align: center;
+}
+
+/* 回答の文章：入力時の改行をそのまま表示し、長い文字列もはみ出さない */
+.note-answer {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 「あなたの答え」ラベルは <label> でも <p> でも同じ見た目にする */
+.note-answer-label {
+  display: block;
+}
+
+
+/* ---------------------------------------------------------------------
+   7-2. 回答の入力欄とボタン
+   --------------------------------------------------------------------- */
+/* 答えを書く入力欄 */
+.note-textarea {
+  display: block;
+  width: 100%;
+  min-height: 9rem;
+  padding: 14px 16px;
+  font-family: inherit;
+  font-size: var(--note-fs-base);   /* 18px。スマホで入力時に勝手に拡大されない大きさ */
+  line-height: 1.8;
+  color: var(--note-navy);
+  background: var(--note-white);
+  border: 2px solid var(--note-line);
+  border-radius: var(--note-radius-bubble);
+  resize: vertical;
+}
+
+/* 入力中は、青い太枠で「いまここに書いている」と分かるように */
+.note-textarea:focus {
+  border-color: var(--note-blue);
+  outline: 3px solid var(--note-sky-strong);
+  outline-offset: 0;
+}
+
+/* エラーメッセージ（空のときは場所を取らない）*/
+.note-error {
+  margin: 8px 0 0;
+  font-size: var(--note-fs-small);
+  font-weight: 700;
+  color: #B3261E;    /* 白背景で十分読める濃い赤 */
+}
+.note-error:empty {
+  display: none;
+}
+
+/* 「保存しました」の表示 */
+.note-saved {
+  margin: 12px 0 0;
+  font-size: var(--note-fs-small);
+  font-weight: 700;
+  color: var(--note-blue-deep);
+}
+
+/* ボタンを並べる場所 */
+.note-actions {
+  display: flex;
+  flex-direction: column;   /* スマホでは縦に並べて、押しやすく */
+  gap: 12px;
+  margin-top: 16px;
+}
+
+/* ボタン共通：指で押しやすい大きさ（高さ56px）*/
+.note-btn {
+  min-height: 56px;
+  padding: 0 28px;
+  font-family: inherit;
+  font-size: var(--note-fs-card);
+  font-weight: 700;
+  border-radius: 14px;
+  cursor: pointer;
+}
+
+/* メインのボタン（保存する）：青地に白文字 */
+.note-btn-main {
+  color: var(--note-white);
+  background: var(--note-blue);
+  border: 2px solid var(--note-blue);
+}
+
+/* サブのボタン（書き直す・やめる）：白地に青文字 */
+.note-btn-sub {
+  color: var(--note-blue-deep);
+  background: var(--note-white);
+  border: 2px solid var(--note-blue);
+}
+
+
+/* ---------------------------------------------------------------------
+   8. フッター
+   --------------------------------------------------------------------- */
+.note-footer {
+  padding: 24px 16px calc(32px + env(safe-area-inset-bottom, 0px));
+  text-align: center;
+  font-size: var(--note-fs-small);
+  color: var(--note-muted);
+}
+
+.note-footer p {
+  margin: 0;
+}
+
+
+/* ---------------------------------------------------------------------
+   9. 画面が広いとき（タブレット・PC）の微調整
+   --------------------------------------------------------------------- */
+@media (min-width: 600px) {
+  .note-header {
+    border-radius: 0 0 32px 32px;
+    padding-left: 28px;
+    padding-right: 28px;
+  }
+  .note-main {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+  /* 画面が広いときは、ボタンを横に並べる */
+  .note-actions {
+    flex-direction: row;
+  }
+}
+
+/* 画面がとても狭い端末（幅360px未満）のとき：はみ出さないよう少し小さく */
+@media (max-width: 359px) {
+  :root {
+    --note-fs-title:   1.75rem;
+    --note-fs-percent: 2.75rem;
+  }
+  .note-secure-icon {
+    width: 48px;
+    height: 48px;
+  }
+}
+
+
+/* ---------------------------------------------------------------------
+   10. 動きが苦手な人への配慮
+   端末で「視差効果を減らす」設定になっているときは、バーのアニメを止める
+   --------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .note-bar-fill {
+    transition: none;
+  }
+}

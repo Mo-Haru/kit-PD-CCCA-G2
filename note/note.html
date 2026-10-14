@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<!--
+  =====================================================================
+  note.html ： 「わたしノート・進捗表示画面」
+  世代間をつなぐ「人生会議（ACP）」共有プラットフォーム（プロトタイプ）
+  ---------------------------------------------------------------------
+  【ファイル構成】
+    note.html … この画面の骨組み（HTML）
+    note.css  … 見た目（スマホ向けレスポンシブ／高齢者向けの大きめ文字）
+    note.js   … 進捗バーの計算・履歴リストの表示（ダミーデータ入り）
+
+  【結合するときのメモ】
+    ・クラス名はすべて「note-」で始めています。他メンバーの画面と
+      CSSがぶつからないようにするためです。
+    ・<main> の中身だけを他のページへ移せば、部品として再利用できます。
+    ・フレームワークは使っていません（HTML / CSS / Vanilla JS のみ）。
+  =====================================================================
+-->
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <!-- スマホで画面幅にぴったり合わせて表示するための設定 -->
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>わたしノート｜人生会議（ACP）共有プラットフォーム</title>
+
+  <!--
+    フォント：読み間違いにくい「BIZ UDPGothic」（ユニバーサルデザイン書体）を使用。
+    ネットにつながらない場合は、CSS側で用意した代替フォントに自動で切り替わります。
+  -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&display=swap" rel="stylesheet">
+
+  <!-- この画面専用のスタイルシート -->
+  <link rel="stylesheet" href="note.css">
+</head>
+
+<body class="note-body">
+  <div class="note-page">
+
+    <!-- ========== ページ上部のヘッダー ========== -->
+    <header class="note-header">
+      <h1 class="note-title">わたしノート</h1>
+      <p class="note-lead">あなたの想いを、少しずつ書きとめましょう。</p>
+    </header>
+
+    <main class="note-main">
+
+      <!-- ========== ① 進捗バー（全体の回答状況） ==========
+           数字・バーの長さ・文言は note.js が自動で書き換えます。
+           ここの「0」は読み込み前の初期表示です。 -->
+      <section class="note-card note-progress" aria-labelledby="note-progress-heading">
+        <h2 id="note-progress-heading" class="note-card-title">回答の進み具合</h2>
+
+        <!-- 大きなパーセント表示（例：60% 完了） -->
+        <p class="note-progress-percent" aria-hidden="true">
+          <span id="note-percent" class="note-progress-number">0</span><span class="note-progress-unit">%</span>
+          <span class="note-progress-done">完了</span>
+        </p>
+
+        <!-- 進捗バー本体。スクリーンリーダー向けに role="progressbar" を付けています -->
+        <div id="note-bar" class="note-bar" role="progressbar"
+             aria-labelledby="note-progress-heading"
+             aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div id="note-bar-fill" class="note-bar-fill"></div>
+        </div>
+
+        <!-- 「5問中3問 回答済み」「あと2問で完了です」などの説明文 -->
+        <p id="note-progress-text" class="note-progress-text"></p>
+      </section>
+
+      <!-- ========== ② 暗号化して保存済みであることの表示 ==========
+           鍵マーク（インラインSVG）＋テキスト。
+           画像ファイルを使わないので、結合時に画像パスの心配がありません。 -->
+      <section class="note-secure" aria-labelledby="note-secure-heading">
+        <span class="note-secure-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="30" height="30" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <!-- 鍵のつる（上の輪っか部分） -->
+            <path d="M7 10V7a5 5 0 0 1 10 0v3"/>
+            <!-- 鍵の本体 -->
+            <rect x="4" y="10" width="16" height="11" rx="2.5"/>
+            <!-- 鍵穴 -->
+            <circle cx="12" cy="15.5" r="1.4" fill="currentColor" stroke="none"/>
+          </svg>
+        </span>
+        <div class="note-secure-body">
+          <h2 id="note-secure-heading" class="note-secure-title">暗号化して保存済み</h2>
+          <p class="note-secure-text">あなたの回答は暗号化され、安全に保管されています。</p>
+        </div>
+      </section>
+
+      <!-- ========== ③ わたしノート（質問と、答えの入力・履歴） ==========
+           <ul id="note-list"> の中身は note.js が自動で作ります。
+           質問ごとに「答えの入力欄」→ 保存後は「回答済みの表示」に切り替わります。
+           （1件ぶんのHTMLの形は note.js の createNoteItem() に書いてあります） -->
+      <section class="note-history" aria-labelledby="note-history-heading">
+        <h2 id="note-history-heading" class="note-section-title">質問と、あなたの答え</h2>
+        <ul id="note-list" class="note-list"></ul>
+      </section>
+
+    </main>
+
+    <footer class="note-footer">
+      <p>人生会議（ACP）共有プラットフォーム　プロトタイプ</p>
+    </footer>
+
+  </div>
+
+  <!-- JavaScript は最後に読み込む（HTMLを先に表示させるため） -->
+  <script src="note.js"></script>
+</body>
+</html>
