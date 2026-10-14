@@ -26,12 +26,17 @@ LINE API を使うかどうかは未決定です。
 
 - 開発環境は Windows
 - バックエンドは Python の Flask
+- Python は 3.14（`Pipfile` の `python_version` と `.python-version`）
+- 依存管理は Pipenv。宣言は `Pipfile` だけにする
+- 直接使うライブラリのバージョンは `Pipfile` に固定する
+- `Pipfile.lock` は Git に含めない。既存の `.gitignore` がロックファイルを無視していたため、その設定を維持する
 - DB 操作は Flask-SQLAlchemy
 - コード共有は GitHub（このリポジトリ）
 - アプリ生成は `create_app` にまとめる
 - `db` は `app/extensions.py` で定義し、`db.init_app` で初期化する
-- Python は 3.14 系。`Pipfile` の `python_version` に合わせる
-- 依存管理は Pipenv。`requirements.txt`、Poetry、uv は併用しない
+- 起動入口は `run.py`。アプリケーション本体は `app` パッケージ
+
+ルートに `app.py` を置くと、`app` パッケージの import と衝突します。確認用の `Hello, World!` は `GET /hello` で返します。
 
 ### 暫定（本番の決定ではない）
 
@@ -39,9 +44,16 @@ LINE API を使うかどうかは未決定です。
 | --- | --- | --- |
 | データベース | SQLite（`instance/dev.db`） | 既存の接続設定がなかった。追加の DB ソフトなしで、ローカルの起動確認ができる。 |
 | 秘密情報 | 開発用のダミー `dev-change-me` | 外部サービスの鍵はまだ無い。鍵が無くてもこの土台は起動できる。この値は本番の秘密鍵ではない。 |
-| 業務モデル | まだ作らない | テーブル設計が未確定。回答本文をサーバーが読める列にすると、方針と矛盾する。 |
+| 業務モデル | まだ作らない | テーブル設計が未確定。回答本文をサーバーが読める列にすると、方針と矛盾する。`app/models/user.py` には、ルートの `models.py` から移したコメントだけの User 下書きがある。クラスはコメントのままなので、テーブルは作られない。 |
 
-直接使うライブラリのバージョンは `Pipfile` に固定しています。Flask 3.1.3、Flask-SQLAlchemy 3.1.1、python-dotenv 1.2.4、開発用の pytest 9.1.1 です。`Pipfile.lock` は既存の `.gitignore` で除外したままにしています。ロックファイルを共有するかは、まだ決めていません。
+直接使うライブラリは `Pipfile` で次のバージョンに固定しています。
+
+- Flask 3.1.3
+- Flask-SQLAlchemy 3.1.1
+- python-dotenv 1.2.4
+- pytest 9.1.1（開発用）
+
+インストール時に入る間接的な依存のバージョンは、`Pipfile.lock` に記録できます。そのファイルは既存の設定どおりリポジトリへは含めません。
 
 ## Windows で必要なソフト
 
@@ -49,7 +61,7 @@ LINE API を使うかどうかは未決定です。
 | --- | --- | --- |
 | Git | 2 系 | リポジトリの取得、ブランチ、Pull Request |
 | Python | 3.14 系 | アプリの実行。インストール時に Python launcher（`py`）を有効にする |
-| Pipenv | `py -3.14 -m pip install --user pipenv` で入る版 | 仮想環境と依存関係。初回起動の手順で入れる |
+| Pipenv | Python 3.14 に入れる | 仮想環境と依存のインストール。コマンドは `py -3.14 -m pipenv` |
 | Web ブラウザ | HTML を表示できるもの | 画面の確認。パスキー用のブラウザ要件は未決定 |
 
 Python は [python.org の 3.14 系](https://www.python.org/downloads/) を使ってください。確認済みのパッチ番号は、この README 末尾の「動作確認した環境」だけです。
@@ -66,39 +78,56 @@ py -3.14 --version
 
 ## 初回起動（PowerShell）
 
-リポジトリのフォルダで実行します。`pipenv run` は仮想環境を有効化しなくても使えます。
+リポジトリのフォルダで実行します。仮想環境の `Activate.ps1` は使わなくて構いません。Pipenv は `py -3.14 -m pipenv` で実行します。
+
+仮想環境はリポジトリ内の `.venv` に作ります。新しい PowerShell を開いたら、Pipenv を使う前に次を実行してください。この指定は、そのウィンドウの中だけで有効です。
+
+```powershell
+$env:PIPENV_VENV_IN_PROJECT = "1"
+```
+
+初回は、Pipenv 自体を Python 3.14 に入れてから依存を入れます。
 
 ```powershell
 git clone https://github.com/Mo-Haru/kit-PD-CCCA-G2.git
 cd kit-PD-CCCA-G2
 py -3.14 -m pip install --user pipenv
-py -3.14 -m pipenv install --dev
+$env:PIPENV_VENV_IN_PROJECT = "1"
+py -3.14 -m pipenv install --dev --python 3.14
 Copy-Item .env.example .env
 py -3.14 -m pipenv run python -m flask --app run init-db
 py -3.14 -m pipenv run python -m flask --app run run --debug
 ```
 
-`py -3.14 -m pipenv` が使えない場合は、`pipenv` が PATH にあることを確認して、`pipenv` だけに置き換えてください。
+`py` が使えない場合は、`python --version` が 3.14 系であることを確認したうえで、`py -3.14` を `python` に置き換えます。
+
+```powershell
+python -m pip install --user pipenv
+$env:PIPENV_VENV_IN_PROJECT = "1"
+python -m pipenv install --dev --python 3.14
+```
 
 `.env` のコピーは省略できます。省略しても、開発用の暫定値（SQLite とダミーの `SECRET_KEY`）で起動します。設定を変えるときだけ `.env` を編集します。`.env.example` に秘密情報は入っていません。
 
-`init-db` は、登録済みモデルのテーブルを作ります。現時点では業務用モデルが無いため、接続の確認と、以後モデルを足したときの手順として実行します。既存のテーブルや行は削除しません。このコマンドを二回実行しても、既存データは消えません。
+`init-db` は、登録済みモデルのテーブルを作ります。現時点では有効な業務用モデルが無いため、接続の確認と、以後モデルを足したときの手順として実行します。既存のテーブルや行は削除しません。このコマンドを二回実行しても、既存データは消えません。
 
-仮想環境を有効にしてから短くすることもできます。
+同じウィンドウで仮想環境に入ってから短くすることもできます。
 
 ```powershell
+$env:PIPENV_VENV_IN_PROJECT = "1"
 py -3.14 -m pipenv shell
 python -m flask --app run init-db
 python -m flask --app run run --debug
 ```
 
-`pipenv shell` が実行ポリシーで止まった場合は、ポリシーを変更せず、上の `pipenv run` の形を使ってください。
+`pipenv shell` が止まった場合は、実行ポリシーを変更せず、`py -3.14 -m pipenv run ...` の形を使ってください。
 
 サーバーを止めるときは、そのウィンドウで Ctrl+C を押します。
 
 起動したままテストする場合は、別の PowerShell を開いてリポジトリのフォルダへ移動し、次を実行します。
 
 ```powershell
+$env:PIPENV_VENV_IN_PROJECT = "1"
 py -3.14 -m pipenv run python -m pytest
 ```
 
@@ -109,17 +138,20 @@ py -3.14 -m pipenv run python -m pytest
 | URL | 正常なとき |
 | --- | --- |
 | http://127.0.0.1:5000/ | 「意思の記録」と、回答・共有・認証へのリンクが見える |
+| http://127.0.0.1:5000/hello | 本文が `Hello, World!` |
 | http://127.0.0.1:5000/answers | 「未実装」と表示され、保存は実行できない |
 | http://127.0.0.1:5000/sharing | 「未実装」と表示され、共有操作は実行できない |
 | http://127.0.0.1:5000/auth | 「未実装」と表示され、ログインした状態にならない |
-| http://127.0.0.1:5000/hello | 文字列 `Hello, World!` |
 | http://127.0.0.1:5000/health | JSON で `status` と `database` がどちらも `ok` |
+
+`/hello` は、以前の単一ファイルのアプリが返していた確認用の応答です。HTML の画面ではなく、本文 `Hello, World!` をそのまま返します。
 
 画面上部に、保存・認証・暗号化・共有が未実装である旨が出ます。未実装のボタンは押せません。認証できたように見せる画面や、暗号化できたように見せる処理はありません。
 
 ポート 5000 が使用中のときは、次でポートを変えます。
 
 ```powershell
+$env:PIPENV_VENV_IN_PROJECT = "1"
 py -3.14 -m pipenv run python -m flask --app run run --debug --port 5001
 ```
 
@@ -140,25 +172,25 @@ app/
     answers.py         回答
     sharing.py         共有
     auth.py            認証
-  models/              DB モデル。user.py はコメントだけの下書き
+  models/              DB モデル。有効な業務モデルはまだ無い
+    user.py            コメントだけの User 下書き。テーブルは作られない
   templates/           共通レイアウトと各画面
   static/css/          共通の CSS
 config.py              開発用設定とテスト用設定
 run.py                 起動用のアプリオブジェクト
-Pipfile                Pipenv の依存関係。Python 3.14
+Pipfile                直接使う依存のバージョンを固定
+.python-version        3.14
 .env.example           秘密情報を含まない設定例
 tests/                 起動、ルート、DB 接続の確認
 ```
 
-最初の `app.py` は `app/` パッケージと同時に置けないため削除しました。`Hello, World!` は `http://127.0.0.1:5000/hello` で返します。ルートの `models.py` にあったコメントの下書きは `app/models/user.py` に移しています。クラスはコメントのままなので、テーブルは作られません。
-
 `app/services/` はまだ作りません。ルートから呼び出す処理をファイルに分けたくなった時点で、例えば `app/services/answers.py` を追加します。最初から層を増やさないでください。
 
-`instance/` は起動時に作られます。SQLite の `instance/dev.db` が入ります。`.venv/`、`.env`、`instance/`、ローカル DB は Git に含めません。
+`instance/` は起動時に作られます。SQLite の `instance/dev.db` が入ります。`.venv/`、`.env`、`instance/`、ローカル DB、`Pipfile.lock` は Git に含めません。
 
 ## 画面、Blueprint、モデルの追加
 
-コマンドは、リポジトリのフォルダで `py -3.14 -m pipenv run python -m ...` を使う前提です。
+コマンドは、リポジトリのフォルダで `$env:PIPENV_VENV_IN_PROJECT = "1"` を設定したあと、`py -3.14 -m pipenv run ...` を使う前提です。
 
 ### 画面と Blueprint
 
@@ -197,8 +229,11 @@ app.register_blueprint(feature_bp)
 3. 次を実行する。既存データは削除されません。
 
 ```powershell
+$env:PIPENV_VENV_IN_PROJECT = "1"
 py -3.14 -m pipenv run python -m flask --app run init-db
 ```
+
+`app/models/user.py` は、ルートにあった `models.py` の下書きです。中身はコメントだけで、テーブルは作られません。有効にするときは、このファイルだけで `SQLAlchemy()` を新しく作らず、`app.extensions` の `db` を使ってください。テーブル設計が決まるまでは、コメントのままにします。
 
 回答本文の列は、ブラウザ側の暗号化方式が決まるまで作りません。サーバーが内容を読める保存やログは、方針と矛盾します。
 
@@ -226,28 +261,38 @@ py -3.14 -m pipenv run python -m flask --app run init-db
 - `config.py`
 - `run.py`
 - `Pipfile`
+- `.python-version`
 - `app/templates/base.html`
 - `app/static/css/style.css`
 - `.gitignore`
 - `.env.example`
 - この README の起動手順
 
-依存を追加するときは `Pipfile` だけを更新します。`requirements.txt`、Poetry、uv を併用しないでください。バージョンを指定して入れ、変更された `Pipfile` をコミットします。
+依存を追加するときも、管理方法は Pipenv と `Pipfile` だけにします。`requirements.txt`、Poetry、uv は併用しないでください。追加するパッケージはバージョンを指定し、`Pipfile` の差分を確認してからコミットします。
 
 ```powershell
-py -3.14 -m pipenv install 追加するパッケージ==バージョン
+$env:PIPENV_VENV_IN_PROJECT = "1"
+py -3.14 -m pipenv install "追加するパッケージ==バージョン"
 ```
 
-開発用のツールは `pipenv install --dev` を使います。`Pipfile.lock` は、いまの `.gitignore` ではコミットしません。
+開発時だけ使うパッケージは次です。
+
+```powershell
+$env:PIPENV_VENV_IN_PROJECT = "1"
+py -3.14 -m pipenv install --dev "追加するパッケージ==バージョン"
+```
+
+この操作で `Pipfile.lock` も更新されることがあります。そのファイルは既存の設定どおり Git に含めません。コミットするのは `Pipfile` の変更です。
 
 やってはいけないことは次のとおりです。
 
-- `.env`、`.venv/`、`instance/`、ローカル DB をコミットしない
+- `.env`、`.venv/`、`instance/`、ローカル DB、`Pipfile.lock` をコミットしない
 - 実在の個人情報や回答を入れない
 - 未実装の認証、暗号化、共有が動いているように見せるコードを入れない
 - 既存 DB のデータを消す処理を実行しない
 - 回答本文を、サーバーが読める形でログに出さない
 - API の鍵が無いとアプリが起動しない状態にしない
+- ルートに `app.py` を置かない。起動入口は `run.py` のままにする
 
 ## GitHub での作業手順
 
@@ -268,7 +313,7 @@ git commit -m "回答画面の下書きを追加"
 git push -u origin feature/answers-draft
 ```
 
-`git add` の対象は、その作業で変更したファイルだけにしてください。`git status` に `.env` や `instance/` が出ていないことを確認します。
+`git add` の対象は、その作業で変更したファイルだけにしてください。`git status` に `.env`、`.venv/`、`instance/`、`Pipfile.lock` が出ていないことを確認します。
 
 push のあと、GitHub のリポジトリページで **Compare & pull request** を開きます。base を `main`、compare を作業ブランチにします。説明には、変更した機能、確認した URL、共通ファイルを変えた理由を書きます。レビューする人はチームで決めてください。
 
@@ -287,8 +332,8 @@ push のあと、GitHub のリポジトリページで **Compare & pull request*
 | QRコード | 未実装 | 共有機能と同じ場所 | QR に載せる内容。回答本文そのものを載せるかどうか |
 | 回答更新の自動反映 | 採用しない方針 | なし | 自動反映する処理は追加しない |
 | LINE API | 未決定 | 使うと決まってから `app/services/line.py` | 使うかどうか、アカウント、メッセージに載せる範囲 |
-| 本番データベース | 未決定 | `DATABASE_URL` と `config.py` | 製品、接続情報の渡し方、バックアップ |
-| Pipfile.lock を共有するか | 既存の `.gitignore` では除外 | `Pipfile` に直接依存のバージョンは固定済み | ロックファイルもコミットするか |
+| 本番データベース | 未決定 | `DATABASE_URL` と `config.py` | 製品、接続情報の渡し方、バックアップ。ローカルは SQLite の暫定のまま |
+| Pipfile.lock を Git に含めるか | 含めない | `.gitignore` | 既存の無視設定を維持している。含めると決めたときだけ無視を外す |
 | 公開方法 | 未決定 | なし | ホスティング。この土台にはデプロイ設定を置いていない |
 
 LINE、パスキー、暗号化、QR のライブラリや鍵は、今回の起動には不要です。
@@ -309,12 +354,15 @@ LINE、パスキー、暗号化、QR のライブラリや鍵は、今回の起�
 
 ## 動作確認した環境
 
-次の確認は Linux 上の Python 3.14.8 と Pipenv で行いました。Windows での起動確認はまだです。PowerShell の `py -3.14 -m pipenv run` は、この Linux 環境では `python3.14 -m pipenv run` に読み替えて確認しています。
+次の確認は Linux 上の Python 3.14.8 と Pipenv 2026.9.1 で行いました。仮想環境は `PIPENV_VENV_IN_PROJECT=1` によりリポジトリ内の `.venv` に作り、`python3.14 -m pipenv install --dev --python 3.14` で依存を入れています。Windows での起動確認はまだです。PowerShell の `py -3.14 -m pipenv` は、この Linux 環境では `python3.14 -m pipenv` に読み替えて確認しています。
 
-- 新しい Pipenv 環境へ `Pipfile` の依存関係をインストールできる
-- `init-db` のあと、アプリを起動できる
-- ホーム、`/hello`、回答、共有、認証、`/health` を表示できる
-- SQLite へ接続でき、`init-db` は既存の行を削除しない
-- `pytest` が成功する
+- `Pipfile` から Flask 3.1.3、Flask-SQLAlchemy 3.1.1、python-dotenv 1.2.4、pytest 9.1.1 をインストールできる
+- `python -m pytest` は 16 件成功する
+- `instance/dev.db` に確認用の行を入れてから `init-db` を 2 回実行し、その行が残る
+- `http://127.0.0.1:5000/` で起動し、`/`、`/hello`、`/answers`、`/sharing`、`/auth`、`/health` が 200 になる
+- `/` は「意思の記録」と「未実装」を表示する
+- `/hello` の本文は `Hello, World!`
+- `/answers`、`/sharing`、`/auth` は「未実装」と「この操作は実行できません」を表示する
+- `/health` は `status` と `database` がどちらも `ok`
 
-Windows でまだ見るものは、`py -3.14` の有無、`pipenv` のインストール、コンソールの文字コード、ブラウザでの画面表示です。起動そのものは、`pipenv shell` を使わない `pipenv run` のコマンドで確認できます。
+Windows でまだ見るものは、`py -3.14` の有無、`py -3.14 -m pip install --user pipenv`、`$env:PIPENV_VENV_IN_PROJECT = "1"`、コンソールの文字コード、ブラウザでの画面表示です。
