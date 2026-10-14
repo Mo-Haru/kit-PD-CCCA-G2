@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}意思の記録{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <a class="skip" href="#main">本文へ</a>
+  <header>
+    <div class="wrap header-inner">
+      <a class="brand" href="{{ url_for('main.index') }}">意思の記録</a>
+      <nav aria-label="主要">
+        <a href="{{ url_for('main.index') }}" {% if request.endpoint == 'main.index' %}aria-current="page"{% endif %}>ホーム</a>
+        <a href="{{ url_for('answers.index') }}" {% if request.endpoint == 'answers.index' %}aria-current="page"{% endif %}>回答</a>
+        <a href="{{ url_for('sharing.index') }}" {% if request.endpoint == 'sharing.index' %}aria-current="page"{% endif %}>共有</a>
+        <a href="{{ url_for('auth.index') }}" {% if request.endpoint == 'auth.index' %}aria-current="page"{% endif %}>認証</a>
+        <a href="{{ url_for('main.health') }}">起動確認</a>
+      </nav>
+    </div>
+  </header>
+  <div class="banner">
+    <p class="wrap">これは開発用の土台です。回答の保存、認証、暗号化、共有は未実装で、操作は実行できません。</p>
+  </div>
+  <main id="main" class="wrap">
+    {% block content %}{% endblock %}
+  </main>
+  <footer>
+    <p class="wrap">ローカル開発用です。本番のデータベースと公開方法は未決定です。</p>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}共有 | 意思の記録{% endblock %}
+{% block content %}
+  <h1>共有</h1>
+  <p><span class="badge">未実装</span></p>
+  <p>本人が明示的に最新の意思を共有する方式を検討しています。回答の更新を共有先へ自動では反映しません。</p>
+  <ul>
+    <li>共有の有効・無効: 未実装</li>
+    <li>共有の期限: 未実装</li>
+    <li>QRコード: 未実装</li>
+  </ul>
+  <fieldset disabled>
+    <legend>共有設定（未実装）</legend>
+    <button type="button">共有を有効にする（未実装）</button>
+    <button type="button">QRコードを表示（未実装）</button>
+  </fieldset>
+  <p class="note">この操作は実行できません。</p>
+  <p class="note">編集場所: <code>app/blueprints/sharing.py</code> と <code>app/templates/sharing/</code></p>
+{% endblock %}

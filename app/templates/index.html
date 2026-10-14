@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}ホーム | 意思の記録{% endblock %}
+{% block content %}
+  <h1>意思の記録</h1>
+  <p class="lead">本人の意思や回答を記録し、家族や医療関係者などへ共有するためのアプリです。いま入っているのは、担当機能を追加するための開発用の土台です。</p>
+
+  <section>
+    <h2>起動確認</h2>
+    <p><a href="{{ url_for('main.health') }}">/health</a> を開くと、アプリの応答とデータベース接続の結果が JSON で返ります。正常なら status と database はどちらも ok です。</p>
+    <p>データベース接続の初期値は、ローカル確認用の SQLite です。本番のデータベースは未決定です。</p>
+  </section>
+
+  <section>
+    <h2>担当機能の入口</h2>
+    <ul class="cards">
+      <li>
+        <h3><a href="{{ url_for('answers.index') }}">回答</a></h3>
+        <p>入力・保存・閲覧。ブラウザ側の暗号化も含みます。<span class="badge">未実装</span></p>
+      </li>
+      <li>
+        <h3><a href="{{ url_for('sharing.index') }}">共有</a></h3>
+        <p>共有の有効・無効、期限、QRコード。<span class="badge">未実装</span></p>
+      </li>
+      <li>
+        <h3><a href="{{ url_for('auth.index') }}">認証</a></h3>
+        <p>パスキー。<span class="badge">未実装</span></p>
+      </li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>決まっている方針</h2>
+    <ul>
+      <li>運営サーバーに回答の内容を読ませない。</li>
+      <li>回答の更新を共有先へ自動反映しない。本人が明示的に最新の意思を共有する。</li>
+      <li>実在の個人情報や回答は、開発中のデータに使わない。</li>
+    </ul>
+  </section>
+{% endblock %}

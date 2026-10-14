@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}認証 | 意思の記録{% endblock %}
+{% block content %}
+  <h1>認証</h1>
+  <p><span class="badge">未実装</span></p>
+  <p>パスキーによる認証は未実装です。ログインした状態にはなりません。</p>
+  <fieldset disabled>
+    <legend>パスキー（未実装）</legend>
+    <button type="button">パスキーでログイン（未実装）</button>
+  </fieldset>
+  <p class="note">この操作は実行できません。</p>
+  <p class="note">編集場所: <code>app/blueprints/auth.py</code> と <code>app/templates/auth/</code></p>
+{% endblock %}
