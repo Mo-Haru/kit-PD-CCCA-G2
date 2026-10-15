@@ -44,7 +44,7 @@ LINE API を使うかどうかは未決定です。
 | --- | --- | --- |
 | データベース | SQLite（`instance/dev.db`） | 既存の接続設定がなかった。追加の DB ソフトなしで、ローカルの起動確認ができる。 |
 | 秘密情報 | 開発用のダミー `dev-change-me` | 外部サービスの鍵はまだ無い。鍵が無くてもこの土台は起動できる。この値は本番の秘密鍵ではない。 |
-| 業務モデル | 永続化層の19モデルを定義済み | 回答・共有内容は暗号文として保存。暗号化や認証・認可の処理は別途実装する。 |
+| 業務モデル | 永続化層のモデルを定義済み | 回答・共有内容は暗号文として保存する。パスキー、家族共有、QR閲覧、端末移行の処理は入っている。回答入力画面とQR画像は未実装。 |
 
 直接使うライブラリは `Pipfile` で次のバージョンまたは許容範囲に指定しています。
 
@@ -53,6 +53,8 @@ LINE API を使うかどうかは未決定です。
 - SQLAlchemy `>=2.0,<2.1`
 - python-dotenv 1.2.4
 - pytest 9.1.1（開発用）
+- webauthn 2.7.1（パスキー検証）
+- pyhpke 0.6.5（開発用。テストがブラウザの HPKE と相互に復号できることを確認する）
 
 インストール時に入る間接的な依存のバージョンは、`Pipfile.lock` に記録できます。そのファイルは既存の設定どおりリポジトリへは含めません。
 
@@ -63,7 +65,7 @@ LINE API を使うかどうかは未決定です。
 | Git | 2 系 | リポジトリの取得、ブランチ、Pull Request |
 | Python | 3.14 系 | アプリの実行。インストール時に Python launcher（`py`）を有効にする |
 | Pipenv | Python 3.14 に入れる | 仮想環境と依存のインストール。コマンドは `py -3.14 -m pipenv` |
-| Web ブラウザ | HTML を表示できるもの | 画面の確認。パスキー用のブラウザ要件は未決定 |
+| Web ブラウザ | パスキーとPRFに対応したもの | 登録と鍵の解除。非対応の場合、画面は登録を完了しません |
 
 Python は [python.org の 3.14 系](https://www.python.org/downloads/) を使ってください。確認済みのパッチ番号は、この README 末尾の「動作確認した環境」だけです。
 
@@ -234,9 +236,9 @@ $env:PIPENV_VENV_IN_PROJECT = "1"
 py -3.14 -m pipenv run python -m flask --app run init-db
 ```
 
-回答・共有内容は暗号文（`ciphertext`）と `nonce` のみを保存し、平文の回答・復号鍵・PRF 出力は保存しません。モデルは保存先と制約だけを定義しており、ブラウザ側の暗号化、WebAuthn 検証、認可、追記方式の強制は未実装です。実装時の契約は `app/models/__init__.py` に記載しています。
+回答・共有内容は暗号文（`ciphertext`）と `nonce` のみを保存し、平文の回答・復号鍵・PRF 出力は保存しません。暗号の契約は `app/crypto_contract.py` と `docs/morishita.md` にあります。
 
-`init-db` は既存テーブルの構造を変更しません。既存 DB のカラム・制約を変更する場合は、Flask-Migrate/Alembic によるマイグレーションを別途導入してください。
+`init-db` は `db.create_all()` のあと、`app/schema_upgrade.py` の未適用手順だけを実行します。既存テーブルの削除や既存行の消去はしません。新しいテーブルはモデルを足して手順を追加します。既存テーブルの列を変えるときも、そのファイルに明示的な変更手順を足します。テーブルを消す手順は書きません。
 
 テーブルを削除するコマンドは用意していません。`db.drop_all()` や DB ファイルの削除を、共有の手順に加えないでください。
 
@@ -246,11 +248,11 @@ py -3.14 -m pipenv run python -m flask --app run init-db
 
 | 機能 | まず編集する場所 | 現時点で置かないもの |
 | --- | --- | --- |
-| 回答の入力・保存・閲覧 | `app/blueprints/answers.py`、`app/templates/answers/index.html`。モデルが必要になったら `app/models/` | サーバーが読める平文の回答列 |
-| ブラウザでの暗号化・復号 | 方式が決まってから `app/static/js/` を新設 | サーバー側での復号。暗号化できたように見せる仮処理 |
-| 共有の有効・無効、期限 | `app/blueprints/sharing.py`、`app/templates/sharing/index.html` | 回答更新の自動反映 |
-| QRコードによる共有 | `app/blueprints/sharing.py` と `app/templates/sharing/` | 未選定の QR ライブラリの先行追加 |
-| パスキー認証 | `app/blueprints/auth.py`、`app/templates/auth/index.html`。ブラウザ側が必要になったら `app/static/js/` | ログインできたことにする仮処理 |
+| 回答の入力・保存・閲覧 | `app/blueprints/answers.py`、`app/templates/answers/index.html`。保存APIは `PUT /api/v1/answers/current` | サーバーが読める平文の回答列。入力フォームの実装 |
+| ブラウザでの暗号化・復号 | `app/static/js/watashi/crypto.mjs` と `client.mjs` | サーバー側での復号 |
+| 家族共有 | `app/services/family_service.py`、`/family` | 回答更新の自動反映。LINE送信 |
+| QRの閲覧開始と停止 | `app/services/qr_service.py`、`/view/<id>` | QR画像の生成と表示（坂担当の画面） |
+| パスキー認証 | `app/blueprints/auth.py`、`/auth`、`app/services/auth_service.py` | ログインできたことにする仮処理 |
 | LINE API | 利用が決まってから `app/services/line.py` を新設 | ソースへの API キーの直書き |
 
 ## 共通ファイルを変えるとき
@@ -289,7 +291,7 @@ py -3.14 -m pipenv install --dev "追加するパッケージ==バージョン"
 
 - `.env`、`.venv/`、`instance/`、ローカル DB、`Pipfile.lock` をコミットしない
 - 実在の個人情報や回答を入れない
-- 未実装の認証、暗号化、共有が動いているように見せるコードを入れない
+- 未実装の回答入力画面、QR画像、LINE送信が動いているように見せるコードを入れない
 - 既存 DB のデータを消す処理を実行しない
 - 回答本文を、サーバーが読める形でログに出さない
 - API の鍵が無いとアプリが起動しない状態にしない
@@ -320,24 +322,24 @@ push のあと、GitHub のリポジトリページで **Compare & pull request*
 
 指摘を反映するときは、同じブランチにコミットして、もう一度 `git push` します。
 
-## 未実装の機能と、先に決めること
+## 実装済みと、まだ未実装のもの
 
-画面上の入口はあります。処理は未実装で、POST も受け付けません。
+パスキー、ブラウザ内の暗号、家族共有、QRの閲覧セッション、端末移行は使えます。接続方法は `docs/morishita.md` です。回答の入力画面、坂担当のQR画像、小橋担当のLINEは未実装のままです。
 
-| 機能 | 状態 | 追加場所 | 実装前に決めること |
-| --- | --- | --- | --- |
-| 回答の入力・保存・閲覧 | 未実装 | `app/blueprints/answers.py`、`app/templates/answers/`、必要なら `app/models/` | 保存する項目。本文をサーバーに持たない形 |
-| ブラウザ側の暗号化・復号 | 未実装 | 決定後に `app/static/js/` | 暗号方式、鍵の生成と保管、共有先が復号する手順。サーバーは復号しない |
-| パスキー認証 | 未実装 | `app/blueprints/auth.py`、`app/templates/auth/` | 使用するライブラリ、対応ブラウザ、パスキーの登録単位 |
-| 共有の有効・無効と期限 | 未実装 | `app/blueprints/sharing.py`、`app/templates/sharing/` | 明示的な共有の単位、期限の表し方、無効化したあとの見え方 |
-| QRコード | 未実装 | 共有機能と同じ場所 | QR に載せる内容。回答本文そのものを載せるかどうか |
-| 回答更新の自動反映 | 採用しない方針 | なし | 自動反映する処理は追加しない |
-| LINE API | 未決定 | 使うと決まってから `app/services/line.py` | 使うかどうか、アカウント、メッセージに載せる範囲 |
-| 本番データベース | 未決定 | `DATABASE_URL` と `config.py` | 製品、接続情報の渡し方、バックアップ。ローカルは SQLite の暫定のまま |
-| Pipfile.lock を Git に含めるか | 含めない | `.gitignore` | 既存の無視設定を維持している。含めると決めたときだけ無視を外す |
-| 公開方法 | 未決定 | なし | ホスティング。この土台にはデプロイ設定を置いていない |
+| 機能 | 状態 | 場所 |
+| --- | --- | --- |
+| 回答の入力画面 | 未実装 | `app/templates/answers/`。保存は `PUT /api/v1/answers/current` を呼ぶ |
+| ブラウザ側の暗号化・復号 | 実装済み | `app/static/js/watashi/crypto.mjs`。サーバーは復号しない |
+| パスキー認証 | 実装済み | `/auth` と `/api/v1/auth/` |
+| 家族共有 | 実装済み | `/family` と `/api/v1/family/` |
+| QRコードの画像 | 未実装 | 画像と表示は坂担当。閲覧開始APIは `/api/v1/qr-shares/` |
+| 回答更新の自動反映 | 採用しない | 共有の更新APIを明示的に呼ぶ |
+| LINE API | 未決定 | 使うと決まってから `app/services/line.py` |
+| 本番データベース | 未決定 | ローカルは SQLite の暫定のまま |
+| Pipfile.lock を Git に含めるか | 含めない | `.gitignore` |
+| 公開方法 | 未決定 | デプロイ設定は置いていない |
 
-LINE、パスキー、暗号化、QR のライブラリや鍵は、今回の起動には不要です。
+ブラウザのHPKEは `app/static/vendor/hpke-js-1.8.0.esm.js`（同じ内容の `.mjs`）を同一オリジンから読みます。CDNは使いません。
 
 ## 設定の切り替え
 

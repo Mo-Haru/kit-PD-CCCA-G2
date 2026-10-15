@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}端末移行 | 意思の記録{% endblock %}
+{% block extra_head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/morishita.css') }}">
+{% endblock %}
+{% block content %}
+  <div class="sensitive">
+    <h1>端末移行</h1>
+    <p>古いパスキーは、新しい端末が鍵束を復号し、新しいパスキーの登録を確認するまで無効化しません。</p>
+    <p id="status" role="status" aria-live="polite"></p>
+    <h2>今の端末</h2>
+    <button id="source-start" type="button">移行を開始</button>
+    <p>移行ID: <span id="source-id"></span></p>
+    <p id="source-state"></p>
+    <p>照合コード: <strong id="source-code"></strong></p>
+    <p>指紋: <strong id="source-fingerprint"></strong></p>
+    <label for="typed-code">新しい端末に出ている照合コード</label>
+    <input id="typed-code" name="typed-code" autocomplete="off" inputmode="text">
+    <button id="source-approve" type="button">コードと指紋を承認</button>
+    <button id="source-cancel" type="button">移行を取り消す</button>
+    <h2>新しい端末</h2>
+    <label for="target-id">移行ID</label>
+    <input id="target-id" name="target-id" autocomplete="off">
+    <button id="target-bind" type="button">この端末の鍵を登録</button>
+    <p>照合コード: <strong id="target-code"></strong></p>
+    <p>指紋: <strong id="target-fingerprint"></strong></p>
+    <button id="target-finish" type="button">鍵束を復号してパスキーを登録</button>
+    <button id="target-finalize" type="button">新しいパスキーでログイン済みなら移行を完了</button>
+  </div>
+  <script type="module" src="{{ url_for('static', filename='js/watashi/transfer.mjs') }}"></script>
+{% endblock %}
