@@ -249,12 +249,26 @@ def _session_from_cookie() -> QrViewSession:
     return row
 
 
-def _retry_existing(share: QrShare, attempt_hash: bytes, now):
+def _reject_closed_share(share: QrShare, now) -> None:
+    if share.stopped_at is not None:
+        fail("qr_stopped", 403, "このQRは停止されています。",
+             action="qr_start", target_type="qr_share", target_id=share.id)
+    if share.mode == "timed" and (share.expires_at is None or share.expires_at <= now):
+        fail("qr_expired", 403, "このQRの期限が切れています。",
+             action="qr_start", target_type="qr_share", target_id=share.id)
+
+
+def _resume_attempt(share: QrShare, attempt_hash: bytes, now):
+    """同じ試行の再送。無操作期限や絶対期限が切れたセッションは延ばさない。"""
     existing = db.session.query(QrViewSession).filter_by(
         qr_share_id=share.id, attempt_hash=attempt_hash,
     ).one_or_none()
-    if existing is None or existing.revoked_at is not None or existing.absolute_expires_at <= now:
+    if existing is None:
         return None
+    if (existing.revoked_at is not None or existing.absolute_expires_at <= now
+            or existing.idle_expires_at <= now):
+        fail("qr_session_expired", 401, "閲覧セッションの期限が切れています。同じ手続きでは再開できません。",
+             action="qr_start", target_type="qr_view_session", target_id=existing.id)
     token = secrets.token_bytes(32)
     existing.token_hash = hashlib.sha256(token).digest()
     idle = now + timedelta(seconds=int(current_app.config["QR_VIEW_IDLE_SECONDS"]))
@@ -281,11 +295,8 @@ def start_view(share_id: str, body: dict) -> ActionResult:
     if share is None or not hmac.compare_digest(share.start_token_hash, token_hash):
         fail("qr_denied", 403, "このQRでは閲覧を開始できません。", action="qr_start", target_type="qr_share")
     now = utcnow()
-    if share.stopped_at is not None:
-        fail("qr_stopped", 403, "このQRは停止されています。", action="qr_start", target_type="qr_share", target_id=share.id)
-    if share.mode == "timed" and (share.expires_at is None or share.expires_at <= now):
-        fail("qr_expired", 403, "このQRの期限が切れています。", action="qr_start", target_type="qr_share", target_id=share.id)
-    retry = _retry_existing(share, attempt_hash, now)
+    _reject_closed_share(share, now)
+    retry = _resume_attempt(share, attempt_hash, now)
     if retry is not None:
         session_row, raw = retry
         audit("qr_start_retry", "qr_view_session", session_row.id, "success")
@@ -302,7 +313,7 @@ def start_view(share_id: str, body: dict) -> ActionResult:
         ).rowcount
         if updated != 1:
             db.session.rollback()
-            retry = _retry_existing(share, attempt_hash, now)
+            retry = _resume_attempt(share, attempt_hash, now)
             if retry is not None:
                 session_row, raw = retry
                 return ActionResult(_start_body(session_row), qr_token=raw)
@@ -324,7 +335,7 @@ def start_view(share_id: str, body: dict) -> ActionResult:
         db.session.commit()
     except IntegrityError:
         db.session.rollback()
-        retry = _retry_existing(share, attempt_hash, now)
+        retry = _resume_attempt(share, attempt_hash, now)
         if retry is not None:
             session_row, raw = retry
             return ActionResult(_start_body(session_row), qr_token=raw)
@@ -347,7 +358,7 @@ def current_view() -> dict:
     session_row = _session_from_cookie()
     now = utcnow()
     if session_row.absolute_expires_at <= now or session_row.idle_expires_at <= now:
-        fail("qr_unauthenticated", 401, "閲覧セッションの期限が切れています。")
+        fail("qr_session_expired", 401, "閲覧セッションの期限が切れています。")
     share = db.session.get(QrShare, session_row.qr_share_id)
     if share is None or share.stopped_at is not None:
         fail("qr_stopped", 403, "このQRは停止されています。")

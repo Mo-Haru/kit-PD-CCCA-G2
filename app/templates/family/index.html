@@ -6,26 +6,43 @@
 {% block content %}
   <div class="sensitive">
     <h1>家族共有</h1>
-    <p>回答の保存は共有を更新しません。共有するときは、相手と項目を確認してから確定します。</p>
+    <p>回答の保存は共有を更新しません。別の画面へ移ると鍵は破棄されるので、この画面でログインし、鍵を解除してから共有します。</p>
+    <p id="lock-state">状態を確認しています。</p>
     <p id="status" role="status" aria-live="polite"></p>
+    <button id="login-here" type="button">この画面でログイン</button>
+    <button id="unlock-here" type="button">この画面で鍵を解除</button>
     <h2>招待</h2>
     <button id="invite-open" type="button">リンクで招待する</button>
     <p id="invite-link" class="secret-link"></p>
+    <button id="copy-invite" type="button">招待リンクをコピー</button>
     <button id="accept-open" type="button">このリンクで参加を申請する</button>
     <ul id="incoming"></ul>
     <h2>接続</h2>
     <ul id="connections"></ul>
+    <h2>共有する範囲</h2>
+    <fieldset>
+      <legend>範囲</legend>
+      <label><input type="radio" name="scope" value="all"> 全体</label>
+      <label><input type="radio" name="scope" value="chapters"> 章</label>
+      <label><input type="radio" name="scope" value="questions" checked> 質問</label>
+    </fieldset>
+    <div id="chapters"></div>
+    <div id="questions"></div>
     <h2>共有を作る</h2>
     <label for="connection">相手</label>
     <select id="connection"></select>
-    <label for="item-ids">共有する項目ID（カンマ区切り）</label>
-    <input id="item-ids" name="item-ids" autocomplete="off">
-    <label><input id="confirm-share" type="checkbox"> 選択した項目だけを、この相手へ共有することを確認しました</label>
+    <label for="expires-at">期限（空欄なら期限なし）</label>
+    <input id="expires-at" type="datetime-local">
+    <button id="show-preview" type="button">共有する内容を確認</button>
+    <div id="preview-output"></div>
+    <label><input id="confirm-share" type="checkbox"> 上に出た相手と項目だけを共有することを確認しました</label>
     <button id="share" type="button">共有を確定</button>
     <h2>自分が共有したもの</h2>
     <ul id="shares"></ul>
+    <div id="history-view"></div>
     <h2>受け取ったもの</h2>
     <ul id="received"></ul>
+    <div id="received-view"></div>
   </div>
   <script type="module" src="{{ url_for('static', filename='js/watashi/family.mjs') }}"></script>
 {% endblock %}

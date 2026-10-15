@@ -321,18 +321,39 @@ def finish_target_passkey(body: dict) -> dict:
     return {"passkey_id": passkey.id, "status": row.status}
 
 
-def finalize(migration_id: str, body: dict) -> dict:
-    expect_fields(body, {"confirmed"})
-    if body.get("confirmed") is not True:
-        fail("confirmation_required", 400, "復号できたことを確認してから完了してください。")
+def _target_session(migration_id: str):
     user, session_row, passkey = load_login()
+    require_reauth(session_row)
     row = db.session.get(DeviceMigration, migration_id)
     if row is None or row.user_id != user.id:
         fail("not_found", 404, "移行手続きが見つかりません。", actor_id=user.id)
     _ensure_current(row)
     if (row.status != "target_ready" or row.target_passkey_id != passkey.id
-            or session_row.passkey_id != passkey.id or row.source_approved_at is None):
+            or session_row.passkey_id != passkey.id or row.source_approved_at is None
+            or row.source_passkey_id == passkey.id):
         fail("migration_state", 409, "移行を完了できる状態ではありません。古いパスキーは無効化していません。",
+             action="migration_finalize", target_type="migration", target_id=row.id, actor_id=user.id)
+    return user, session_row, passkey, row
+
+
+def acknowledge_decrypt(migration_id: str, body: dict) -> dict:
+    expect_fields(body, set())
+    user, _session_row, _passkey, row = _target_session(migration_id)
+    if row.decrypt_confirmed_at is None:
+        row.decrypt_confirmed_at = utcnow()
+        audit("migration_decrypt_confirmed", "migration", row.id, "success", actor_id=user.id)
+        db.session.commit()
+    return {"ok": True, "status": row.status, "decrypt_confirmed": True}
+
+
+def finalize(migration_id: str, body: dict) -> dict:
+    expect_fields(body, {"confirmed"})
+    if body.get("confirmed") is not True:
+        fail("confirmation_required", 400, "復号できたことを確認してから完了してください。")
+    user, _session_row, passkey, row = _target_session(migration_id)
+    if row.decrypt_confirmed_at is None:
+        fail("decrypt_unconfirmed", 409,
+             "新しいパスキーで保管用鍵と既存データを開けたことを確認してから完了してください。古いパスキーは無効化していません。",
              action="migration_finalize", target_type="migration", target_id=row.id, actor_id=user.id)
     source = db.session.get(PasskeyCredential, row.source_passkey_id)
     if source is None or source.revoked_at is not None or source.user_id != user.id:

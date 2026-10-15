@@ -448,6 +448,21 @@ def update_share(share_id: str, body: dict) -> dict:
     return {"share": _owner_share_view(share)}
 
 
+def change_expiry(share_id: str, body: dict) -> dict:
+    user, session_row, _passkey = load_login()
+    require_reauth(session_row)
+    expect_fields(body, {"expires_at"})
+    share = db.session.get(FamilyShare, share_id)
+    if share is None or share.owner_user_id != user.id:
+        fail("not_found", 404, "共有が見つかりません。", actor_id=user.id)
+    if share.status == "stopped":
+        fail("share_stopped", 409, "停止した共有の期限は変更できません。", actor_id=user.id)
+    share.expires_at = _parse_expiry(body.get("expires_at"), share.created_at)
+    audit("share_expiry_changed", "family_share", share.id, "success", actor_id=user.id)
+    db.session.commit()
+    return {"share": _owner_share_view(share)}
+
+
 def stop_share(share_id: str) -> dict:
     user, session_row, _passkey = load_login()
     require_reauth(session_row)

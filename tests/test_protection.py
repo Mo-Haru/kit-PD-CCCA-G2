@@ -724,6 +724,20 @@ def test_migration_keeps_source_until_target_confirms(client, app):
     assert verified.status_code == 200, verified.get_json()
     logged, _credential = login(target, target_passkey)
     assert logged.status_code == 200, logged.get_json()
+    login_only = post(target, f"/api/v1/transfer/{migration_id}/finalize", {"confirmed": True})
+    assert login_only.status_code == 403
+    assert login_only.get_json()["error"] == "reauth_required"
+    unlock(target, target_passkey)
+    unconfirmed = post(target, f"/api/v1/transfer/{migration_id}/finalize", {"confirmed": True})
+    assert unconfirmed.status_code == 409
+    assert unconfirmed.get_json()["error"] == "decrypt_unconfirmed"
+    outsider_ack = post(outsider, f"/api/v1/transfer/{migration_id}/decrypt-confirmed", {})
+    assert outsider_ack.status_code == 404
+    still_source, _credential = login(app.test_client(), source_passkey)
+    assert still_source.status_code == 200
+    acknowledged = post(target, f"/api/v1/transfer/{migration_id}/decrypt-confirmed", {})
+    assert acknowledged.status_code == 200, acknowledged.get_json()
+    assert acknowledged.get_json()["decrypt_confirmed"] is True
     done = post(target, f"/api/v1/transfer/{migration_id}/finalize", {"confirmed": True})
     assert done.status_code == 200, done.get_json()
     revoked, _credential = login(app.test_client(), source_passkey)
@@ -765,6 +779,294 @@ def test_schema_upgrade_recreates_missing_table_without_deleting_users(app):
         assert db.session.get(User, user_id).display_name == "残す人"
 
 
+def test_stale_answer_revision_keeps_the_first_writer(client, app):
+    passkey, owner, _public = register(client, "編集A")
+    other = app.test_client()
+    logged, _credential = login(other, passkey)
+    assert logged.status_code == 200
+    first_bytes = b"editor-b-ciphertext"
+    second_bytes = b"editor-a-stale-text"
+    saved = put(client, "/api/v1/answers/current", {
+        "expected_revision": 0,
+        "data_key_id": owner["data_key_id"],
+        "nonce": b64encode(secrets.token_bytes(12)),
+        "ciphertext": b64encode(first_bytes),
+        "crypto_version": 1,
+        "schema_version": 1,
+    })
+    assert saved.status_code == 200, saved.get_json()
+    missing = put(other, "/api/v1/answers/current", {
+        "data_key_id": owner["data_key_id"],
+        "nonce": b64encode(secrets.token_bytes(12)),
+        "ciphertext": b64encode(second_bytes),
+        "crypto_version": 1,
+        "schema_version": 1,
+    })
+    assert missing.status_code == 400
+    assert missing.get_json()["error"] == "invalid_revision"
+    stale = put(other, "/api/v1/answers/current", {
+        "expected_revision": 0,
+        "data_key_id": owner["data_key_id"],
+        "nonce": b64encode(secrets.token_bytes(12)),
+        "ciphertext": b64encode(second_bytes),
+        "crypto_version": 1,
+        "schema_version": 1,
+    })
+    assert stale.status_code == 409
+    assert stale.get_json()["error"] == "revision_conflict"
+    current = client.get("/api/v1/answers/current").get_json()
+    assert current["revision"] == 1
+    assert b64decode(current["document"]["ciphertext"]) == first_bytes
+    assert second_bytes not in client.get("/api/v1/answers/current").get_data()
+
+
+def test_family_expiry_disconnect_and_reconnect_keeps_old_share_stopped(client, app):
+    register(client, "本人")
+    public, private = hpke_keypair()
+    recipient, _passkey, body, connection_id = connect_pair(app, client, None, "家族", public)
+    plaintext = json.dumps({
+        "schema": 1,
+        "items": {"q-keep": {"state": "answered", "value": "見せる"}, "q-hide": {"state": "declined"}},
+    }, ensure_ascii=False).encode()
+    created, share_id, aad = share_payload(
+        client, connection_id, body["user_id"], body["encryption_key_id"], public, plaintext,
+    )
+    assert created.status_code == 200, created.get_json()
+    opened = hpke_open(
+        private,
+        b64decode(created.get_json()["share"]["current"]["hpke_enc"]),
+        b64decode(created.get_json()["share"]["current"]["ciphertext"]),
+        aad,
+    )
+    assert "見せる" in opened.decode()
+    assert json.loads(opened)["items"]["q-hide"]["state"] == "declined"
+    later = stamp(utcnow() + timedelta(days=2))
+    changed = post(client, f"/api/v1/family/shares/{share_id}/expiry", {"expires_at": later})
+    assert changed.status_code == 200, changed.get_json()
+    assert changed.get_json()["share"]["expires_at"] == later
+    seen = recipient.get(f"/api/v1/family/received/{share_id}")
+    assert seen.status_code == 200
+    assert seen.get_json()["share"]["expires_at"] == later
+    assert recipient.get(f"/api/v1/family/shares/{share_id}/history").status_code == 404
+    assert post(recipient, f"/api/v1/family/shares/{share_id}/expiry", {"expires_at": later}).status_code == 404
+    with app.app_context():
+        row = db.session.get(FamilyShare, share_id)
+        row.created_at = utcnow() - timedelta(days=2)
+        row.expires_at = utcnow() - timedelta(minutes=1)
+        version_before = row.current_version
+        db.session.commit()
+    assert recipient.get(f"/api/v1/family/received/{share_id}").status_code == 404
+    cleared = post(client, f"/api/v1/family/shares/{share_id}/expiry", {"expires_at": None})
+    assert cleared.status_code == 200, cleared.get_json()
+    assert cleared.get_json()["share"]["expires_at"] is None
+    assert recipient.get(f"/api/v1/family/received/{share_id}").status_code == 200
+    with app.app_context():
+        assert db.session.get(FamilyShare, share_id).current_version == version_before
+    assert post(recipient, f"/api/v1/family/connections/{connection_id}/disconnect").status_code == 200
+    assert recipient.get(f"/api/v1/family/received/{share_id}").status_code == 404
+    assert client.get(f"/api/v1/family/shares/{share_id}/history").status_code == 200
+    invited = post(client, "/api/v1/family/invitations", {"kind": "open"})
+    assert invited.status_code == 200, invited.get_json()
+    assert post(recipient, "/api/v1/family/invitations/request", {"token": invited.get_json()["token"]}).status_code == 200
+    confirmed = post(client, f"/api/v1/family/invitations/{invited.get_json()['invitation']['id']}/confirm")
+    assert confirmed.status_code == 200, confirmed.get_json()
+    assert recipient.get(f"/api/v1/family/received/{share_id}").status_code == 404
+
+
+def test_emergency_idle_expiry_cannot_be_retried(client, app):
+    _passkey, owner, _public = register(client, "緊急QR")
+    public, _private = hpke_keypair()
+    token = secrets.token_bytes(32)
+    body, _aad = qr_body(owner["user_id"], "emergency", public, token, b"once")
+    assert post(client, "/api/v1/qr-shares", body).status_code == 200
+    viewer = app.test_client()
+    attempt = secrets.token_bytes(32)
+    page = viewer.get(f"/view/{body['id']}")
+    assert page.status_code == 200
+    assert "内容を開く" in page.get_data(as_text=True)
+    with app.app_context():
+        assert db.session.get(QrShare, body["id"]).consumed_at is None
+        assert db.session.query(QrViewSession).count() == 0
+    started = post(viewer, f"/api/v1/qr-shares/{body['id']}/start", {
+        "start_token": b64encode(token), "attempt_id": b64encode(attempt),
+    })
+    assert started.status_code == 200, started.get_json()
+    absolute = started.get_json()["absolute_expires_at"]
+    retried = post(viewer, f"/api/v1/qr-shares/{body['id']}/start", {
+        "start_token": b64encode(token), "attempt_id": b64encode(attempt),
+    })
+    assert retried.status_code == 200
+    assert retried.get_json()["session_id"] == started.get_json()["session_id"]
+    assert retried.get_json()["absolute_expires_at"] == absolute
+    with app.app_context():
+        row = db.session.get(QrViewSession, started.get_json()["session_id"])
+        row.issued_at = utcnow() - timedelta(minutes=10)
+        row.idle_expires_at = utcnow() - timedelta(seconds=1)
+        db.session.commit()
+    expired = post(viewer, f"/api/v1/qr-shares/{body['id']}/start", {
+        "start_token": b64encode(token), "attempt_id": b64encode(attempt),
+    })
+    assert expired.status_code == 401
+    assert expired.get_json()["error"] == "qr_session_expired"
+    assert viewer.get("/api/v1/qr-view/current").status_code == 401
+    with app.app_context():
+        row = db.session.get(QrViewSession, started.get_json()["session_id"])
+        assert row.idle_expires_at <= utcnow()
+        assert stamp(row.absolute_expires_at) == absolute
+    fresh = post(app.test_client(), f"/api/v1/qr-shares/{body['id']}/start", {
+        "start_token": b64encode(token), "attempt_id": b64encode(secrets.token_bytes(32)),
+    })
+    assert fresh.status_code == 409
+    assert fresh.get_json()["error"] == "qr_used"
+
+
+def test_timed_qr_deadlines_are_not_extended_by_retry(client, app):
+    _passkey, owner, _public = register(client)
+    public, _private = hpke_keypair()
+    token = secrets.token_bytes(32)
+    expires = stamp(utcnow() + timedelta(hours=2))
+    body, _aad = qr_body(owner["user_id"], "timed", public, token, b"timed", expires)
+    assert post(client, "/api/v1/qr-shares", body).status_code == 200
+    viewer = app.test_client()
+    attempt = secrets.token_bytes(32)
+    started = post(viewer, f"/api/v1/qr-shares/{body['id']}/start", {
+        "start_token": b64encode(token), "attempt_id": b64encode(attempt),
+    })
+    assert started.status_code == 200, started.get_json()
+    with app.app_context():
+        row = db.session.get(QrViewSession, started.get_json()["session_id"])
+        row.issued_at = utcnow() - timedelta(minutes=10)
+        row.absolute_expires_at = utcnow() - timedelta(seconds=30)
+        row.idle_expires_at = utcnow() - timedelta(seconds=60)
+        db.session.commit()
+    absolute_retry = post(viewer, f"/api/v1/qr-shares/{body['id']}/start", {
+        "start_token": b64encode(token), "attempt_id": b64encode(attempt),
+    })
+    assert absolute_retry.status_code == 401
+    assert viewer.get("/api/v1/qr-view/current").status_code == 401
+    with app.app_context():
+        row = db.session.get(QrViewSession, started.get_json()["session_id"])
+        assert row.absolute_expires_at <= utcnow()
+    holder = app.test_client()
+    renewed = post(holder, f"/api/v1/qr-shares/{body['id']}/start", {
+        "start_token": b64encode(token), "attempt_id": b64encode(secrets.token_bytes(32)),
+    })
+    assert renewed.status_code == 200
+    assert renewed.get_json()["session_id"] != started.get_json()["session_id"]
+    with app.app_context():
+        expired_row = db.session.get(QrViewSession, started.get_json()["session_id"])
+        assert expired_row.absolute_expires_at <= utcnow()
+    shortened = stamp(utcnow() + timedelta(minutes=30))
+    changed = post(client, f"/api/v1/qr-shares/{body['id']}/expiry", {
+        "expected_version": 1,
+        "expires_at": shortened,
+    })
+    assert changed.status_code == 200, changed.get_json()
+    assert changed.get_json()["share"]["expires_at"] == shortened
+    with app.app_context():
+        share = db.session.get(QrShare, body["id"])
+        share.created_at = utcnow() - timedelta(hours=2)
+        share.expires_at = utcnow() - timedelta(seconds=1)
+        db.session.commit()
+    current = holder.get("/api/v1/qr-view/current")
+    assert current.status_code == 403
+    assert current.get_json()["error"] == "qr_expired"
+    held = post(app.test_client(), f"/api/v1/qr-shares/{body['id']}/start", {
+        "start_token": b64encode(token), "attempt_id": b64encode(secrets.token_bytes(32)),
+    })
+    assert held.status_code == 403
+    assert held.get_json()["error"] == "qr_expired"
+
+
+def test_added_passkey_proof_requires_reauth_and_old_passkey_remains(client, app):
+    original, _created, _public = register(client, "追加する人")
+    fresh = app.test_client()
+    logged, _credential = login(fresh, original)
+    assert logged.status_code == 200
+    denied = post(fresh, f"/api/v1/auth/passkeys/{logged.get_json()['passkey_id']}/proof/options", {})
+    assert denied.status_code == 403
+    assert denied.get_json()["error"] == "reauth_required"
+    options = post(client, "/api/v1/auth/passkeys/options", {})
+    assert options.status_code == 200, options.get_json()
+    added = SoftPasskey()
+    verified = post(client, "/api/v1/auth/passkeys/verify", {
+        "credential": added.register(options.get_json()["public_key"], ORIGIN),
+        "envelope": envelope(options.get_json()["prf_input"]),
+    })
+    assert verified.status_code == 200, verified.get_json()
+    proof = post(client, f"/api/v1/auth/passkeys/{verified.get_json()['passkey_id']}/proof/options", {})
+    assert proof.status_code == 200, proof.get_json()
+    assert "wrapped_key" in proof.get_json()["envelope"]
+    proved = post(client, f"/api/v1/auth/passkeys/{verified.get_json()['passkey_id']}/proof/verify", {
+        "credential": added.authenticate(proof.get_json()["public_key"], ORIGIN),
+    })
+    assert proved.status_code == 200, proved.get_json()
+    again, _credential = login(app.test_client(), original)
+    assert again.status_code == 200
+    family = client.get("/family")
+    transfer = client.get("/transfer")
+    assert b'id="unlock-here"' in family.data
+    assert b'id="show-preview"' in family.data
+    assert b'id="target-confirm"' in transfer.data
+    assert b'id="login-here"' in transfer.data
+
+
+def test_prove_passkey_upgrade_keeps_existing_challenges(app):
+    with app.app_context():
+        db.create_all()
+        apply_schema_upgrades()
+        db.session.execute(text("DROP TABLE webauthn_challenges"))
+        db.session.execute(text(
+            "CREATE TABLE webauthn_challenges ("
+            "challenge BLOB NOT NULL, purpose VARCHAR(24) NOT NULL, user_id VARCHAR(36), "
+            "flow_binding_hash BLOB NOT NULL, request_options JSON NOT NULL, "
+            "expires_at DATETIME NOT NULL, consumed_at DATETIME, id VARCHAR(36) NOT NULL, "
+            "created_at DATETIME NOT NULL, PRIMARY KEY (id), "
+            "CONSTRAINT ck_webauthn_challenges_purpose CHECK "
+            "(purpose IN ('register', 'login', 'reauthenticate', 'add_passkey')), "
+            "UNIQUE (challenge))"
+        ))
+        db.session.execute(text(
+            "INSERT INTO webauthn_challenges ("
+            "challenge, purpose, user_id, flow_binding_hash, request_options, "
+            "expires_at, consumed_at, id, created_at"
+            ") VALUES (:challenge, 'login', NULL, :flow, '{}', "
+            "'2026-10-16 00:00:00', NULL, '11111111-1111-1111-1111-111111111111', "
+            "'2026-10-15 00:00:00')"
+        ), {"challenge": b"a" * 32, "flow": b"b" * 32})
+        db.session.execute(text(
+            "DELETE FROM schema_migrations WHERE version = '20261015_prove_passkey_purpose'"
+        ))
+        db.session.commit()
+        apply_schema_upgrades()
+        purpose = db.session.execute(text(
+            "SELECT purpose FROM webauthn_challenges "
+            "WHERE id = '11111111-1111-1111-1111-111111111111'"
+        )).scalar()
+        assert purpose == "login"
+        definition = db.session.execute(text(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'webauthn_challenges'"
+        )).scalar()
+        assert "prove_passkey" in definition
+
+
+def test_decrypt_confirmed_column_upgrade_keeps_the_table(app):
+    with app.app_context():
+        db.create_all()
+        apply_schema_upgrades()
+        db.session.execute(text("ALTER TABLE device_migrations DROP COLUMN decrypt_confirmed_at"))
+        db.session.execute(text(
+            "DELETE FROM schema_migrations WHERE version = '20261015_migration_decrypt_confirmed'"
+        ))
+        db.session.commit()
+        names = {column["name"] for column in inspect(db.engine).get_columns("device_migrations")}
+        assert "decrypt_confirmed_at" not in names
+        apply_schema_upgrades()
+        names = {column["name"] for column in inspect(db.engine).get_columns("device_migrations")}
+        assert "decrypt_confirmed_at" in names
+        assert db.session.query(User).count() == 0
+
+
 def test_browser_and_python_hpke_interoperate(tmp_path):
     first = subprocess.run(
         ["node", "tests/browser_crypto.mjs"], cwd=ROOT, capture_output=True, text=True, check=False,
@@ -797,3 +1099,7 @@ def test_browser_and_python_hpke_interoperate(tmp_path):
     assert "holdQrSecrets" in source
     assert "location.hash" in source
     assert "wn_qr" not in source
+    flows = subprocess.run(
+        ["node", "tests/page_flows.mjs"], cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    assert flows.returncode == 0, flows.stderr + flows.stdout

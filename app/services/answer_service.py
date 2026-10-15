@@ -12,7 +12,7 @@ from app.crypto_contract import (
     SCHEMA_VERSION,
 )
 from app.extensions import db
-from app.models import PrivateAnswerDocument, Question, UserDataKey, utcnow
+from app.models import PrivateAnswerDocument, Question, QuestionCategory, UserDataKey, utcnow
 from app.services.support import (
     audit,
     b64decode,
@@ -42,13 +42,25 @@ def contract() -> dict:
 
 def question_index() -> dict:
     rows = db.session.query(Question).filter_by(is_active=True).order_by(Question.sort_order.asc()).all()
-    return {"questions": [{
-        "id": row.id,
-        "question_key": row.question_key,
-        "version": row.version,
-        "category_id": row.category_id,
-        "answer_type": row.answer_type,
-    } for row in rows]}
+    categories = (
+        db.session.query(QuestionCategory)
+        .filter_by(is_active=True)
+        .order_by(QuestionCategory.sort_order.asc())
+        .all()
+    )
+    names = {row.id: row.name for row in categories}
+    return {
+        "categories": [{"id": row.id, "name": row.name} for row in categories],
+        "questions": [{
+            "id": row.id,
+            "question_key": row.question_key,
+            "version": row.version,
+            "category_id": row.category_id,
+            "category_name": names.get(row.category_id),
+            "answer_type": row.answer_type,
+            "text": row.text,
+        } for row in rows],
+    }
 
 
 def _latest(user_id: str) -> PrivateAnswerDocument | None:
@@ -111,5 +123,5 @@ def save_answer(body: dict) -> dict:
     )
     db.session.add(document)
     audit("answer_saved", "answer", str(current + 1), "success", actor_id=user.id)
-    commit_or_conflict("別の更新が入ったため、保存できませんでした。")
+    commit_or_conflict("別の更新が入ったため、保存できませんでした。", code="revision_conflict")
     return {"revision": document.revision, "document": _view(document)}

@@ -72,6 +72,16 @@ def disable_passkey(passkey_id):
     return finish(auth_service.disable_passkey(passkey_id, json_body()))
 
 
+@bp.post("/api/v1/auth/passkeys/<passkey_id>/proof/options")
+def passkey_proof_options(passkey_id):
+    return finish(auth_service.begin_passkey_proof(passkey_id))
+
+
+@bp.post("/api/v1/auth/passkeys/<passkey_id>/proof/verify")
+def passkey_proof_verify(passkey_id):
+    return _ok(auth_service.finish_passkey_proof(passkey_id, json_body()))
+
+
 @bp.get("/api/v1/auth/envelopes")
 def envelopes():
     return _ok(auth_service.own_envelopes())
@@ -165,6 +175,11 @@ def share_update(share_id):
 @bp.post("/api/v1/family/shares/<share_id>/stop")
 def share_stop(share_id):
     return _ok(family_service.stop_share(share_id))
+
+
+@bp.post("/api/v1/family/shares/<share_id>/expiry")
+def share_expiry(share_id):
+    return _ok(family_service.change_expiry(share_id, json_body()))
 
 
 @bp.get("/api/v1/family/shares/<share_id>/history")
@@ -270,6 +285,11 @@ def transfer_approve(migration_id):
 @bp.post("/api/v1/transfer/<migration_id>/bundle")
 def transfer_bundle(migration_id):
     return _ok(transfer_service.upload_bundle(migration_id, json_body()))
+
+
+@bp.post("/api/v1/transfer/<migration_id>/decrypt-confirmed")
+def transfer_decrypt_confirmed(migration_id):
+    return _ok(transfer_service.acknowledge_decrypt(migration_id, json_body()))
 
 
 @bp.post("/api/v1/transfer/<migration_id>/finalize")

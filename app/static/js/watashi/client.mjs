@@ -18,7 +18,8 @@ import {
   hpkeAad,
   hpkeOpen,
   hpkeSeal,
-  selectedShareItems,
+  openMigrationRecords,
+  plaintextForSelection,
   unwrapStorageKey,
   wrapStorageKey,
 } from "./crypto.mjs";
@@ -223,7 +224,7 @@ export async function addPasskey() {
     credentialIdB64: credential.id,
     dataKeyId: options.data_key_id,
   });
-  return api("/api/v1/auth/passkeys/verify", {
+  const created = await api("/api/v1/auth/passkeys/verify", {
     method: "POST",
     body: {
       credential: credentialJson(credential),
@@ -237,6 +238,44 @@ export async function addPasskey() {
       },
     },
   });
+  try {
+    await provePasskey(created.passkey_id, vault.storageKey);
+  } catch (error) {
+    await api(`/api/v1/auth/passkeys/${created.passkey_id}/disable`, { method: "POST", body: {} }).catch(() => {});
+    throw error;
+  }
+  return created;
+}
+
+async function provePasskey(passkeyId, storageKey) {
+  const proof = await api(`/api/v1/auth/passkeys/${passkeyId}/proof/options`, { method: "POST", body: {} });
+  const assertion = await navigator.credentials.get({ publicKey: publicKeyRequest(proof.public_key) });
+  const output = prfOutput(assertion);
+  if (!output) throw new Error("追加したパスキーでは鍵を解けません。追加を取り消しました。");
+  const envelope = proof.envelope;
+  const opened = await unwrapStorageKey({
+    prfOutput: output,
+    kdfSalt: b64urlToBytes(envelope.kdf_salt),
+    wrappedKey: b64urlToBytes(envelope.wrapped_key),
+    nonce: b64urlToBytes(envelope.nonce),
+    userHandleB64: bytesToB64url(new Uint8Array(assertion.response.userHandle)),
+    credentialIdB64: assertion.id,
+    dataKeyId: envelope.data_key_id,
+  });
+  if (!sameBytes(opened, storageKey)) {
+    throw new Error("追加したパスキーでは今の保管用鍵を開けません。追加を取り消しました。");
+  }
+  return api(`/api/v1/auth/passkeys/${passkeyId}/proof/verify`, {
+    method: "POST",
+    body: { credential: credentialJson(assertion) },
+  });
+}
+
+function sameBytes(left, right) {
+  if (!(left instanceof Uint8Array) || !(right instanceof Uint8Array) || left.length !== right.length) return false;
+  let diff = 0;
+  for (let index = 0; index < left.length; index += 1) diff |= left[index] ^ right[index];
+  return diff === 0;
 }
 
 export async function registerTransferredPasskey(transferToken, storageKey) {
@@ -301,6 +340,7 @@ export async function unlock() {
     dataKeyId: envelope.data_key_id,
   });
   const session = await api("/api/v1/auth/session");
+  let bundleObject = null;
   if (options.key_bundle) {
     const opened = await decryptBundle({
       storageKey,
@@ -309,15 +349,18 @@ export async function unlock() {
       nonce: b64urlToBytes(options.key_bundle.nonce),
       ciphertext: b64urlToBytes(options.key_bundle.ciphertext),
     });
-    rememberBundle(JSON.parse(new TextDecoder().decode(opened)), null);
-    const keys = await api(`/api/v1/encryption-keys/${session.user_id}`);
-    const active = keys.keys.find((item) => item.status === "active");
-    if (active) vault.receiveKeyId = active.id;
+    bundleObject = JSON.parse(new TextDecoder().decode(opened));
   }
   await api("/api/v1/auth/unlock/verify", { method: "POST", body: { credential: credentialJson(credential) } });
   vault.storageKey = storageKey;
   vault.dataKeyId = envelope.data_key_id;
   vault.userId = session.user_id;
+  if (bundleObject) {
+    rememberBundle(bundleObject, null);
+    const keys = await api(`/api/v1/encryption-keys/${session.user_id}`);
+    const active = keys.keys.find((item) => item.status === "active");
+    if (active) vault.receiveKeyId = active.id;
+  }
   return { ok: true };
 }
 
@@ -332,11 +375,15 @@ export async function logout() {
   return result;
 }
 
-export async function saveAnswerDocument(items) {
+export async function saveAnswerDocument(items, expectedRevision) {
   if (!vault.storageKey) throw new Error("先にパスキーで鍵を解除してください。");
-  const current = await api("/api/v1/answers/current");
+  if (!Number.isInteger(expectedRevision) || expectedRevision < 0) {
+    const error = new Error("編集を始めた版を指定してください。最新版への自動付け替えはしません。");
+    error.code = "revision_required";
+    throw error;
+  }
   const document = buildAnswerDocument(items);
-  const next = current.revision + 1;
+  const next = expectedRevision + 1;
   const packed = await encryptDocument({
     storageKey: vault.storageKey,
     dataKeyId: vault.dataKeyId,
@@ -348,7 +395,7 @@ export async function saveAnswerDocument(items) {
   return api("/api/v1/answers/current", {
     method: "PUT",
     body: {
-      expected_revision: current.revision,
+      expected_revision: expectedRevision,
       data_key_id: vault.dataKeyId,
       nonce: bytesToB64url(packed.nonce),
       ciphertext: bytesToB64url(packed.ciphertext),
@@ -361,7 +408,7 @@ export async function saveAnswerDocument(items) {
 export async function loadAnswerDocument() {
   if (!vault.storageKey) throw new Error("先にパスキーで鍵を解除してください。");
   const current = await api("/api/v1/answers/current");
-  if (!current.document) return null;
+  if (!current.document) return { revision: 0, document: null };
   const opened = await decryptDocument({
     storageKey: vault.storageKey,
     dataKeyId: current.document.data_key_id,
@@ -371,13 +418,14 @@ export async function loadAnswerDocument() {
     nonce: b64urlToBytes(current.document.nonce),
     ciphertext: b64urlToBytes(current.document.ciphertext),
   });
-  return JSON.parse(new TextDecoder().decode(opened));
+  return { revision: current.revision, document: JSON.parse(new TextDecoder().decode(opened)) };
 }
 
-export async function createFamilyShare({ connectionId, recipientKeyId, recipientUserId, selectedIds, expiresAt = null }) {
+export async function createFamilyShare({ connectionId, recipientKeyId, recipientUserId, selection, expiresAt = null }) {
   if (!vault.storageKey || !vault.userId) throw new Error("先にパスキーで鍵を解除してください。");
-  const document = await loadAnswerDocument();
-  const payload = selectedShareItems(document || { schema: 1, items: {} }, selectedIds);
+  const catalog = await api("/api/v1/answers/questions");
+  const loaded = await loadAnswerDocument();
+  const payload = plaintextForSelection(loaded.document, catalog, selection);
   const shareId = randomUuid();
   const keys = await api(`/api/v1/encryption-keys/${recipientUserId}`);
   const active = keys.keys.find((item) => item.id === recipientKeyId && item.status === "active");
@@ -409,6 +457,55 @@ export async function createFamilyShare({ connectionId, recipientKeyId, recipien
       connection_id: connectionId,
       recipient_key_id: recipientKeyId,
       expires_at: expiresAt,
+      confirmed: true,
+      version: { hpke_enc: bytesToB64url(sealed.enc), ciphertext: bytesToB64url(sealed.ciphertext) },
+      owner_copy: {
+        data_key_id: vault.dataKeyId,
+        nonce: bytesToB64url(owner.nonce),
+        ciphertext: bytesToB64url(owner.ciphertext),
+        crypto_version: 1,
+      },
+    },
+  });
+}
+
+export async function updateFamilyShare({ shareId, expectedVersion, recipientKeyId, recipientUserId, selection }) {
+  if (!vault.storageKey || !vault.userId) throw new Error("先にパスキーで鍵を解除してください。");
+  if (!Number.isInteger(expectedVersion) || expectedVersion < 1) {
+    throw new Error("更新する共有の版が指定されていません。");
+  }
+  const catalog = await api("/api/v1/answers/questions");
+  const loaded = await loadAnswerDocument();
+  const payload = plaintextForSelection(loaded.document, catalog, selection);
+  const keys = await api(`/api/v1/encryption-keys/${recipientUserId}`);
+  const active = keys.keys.find((item) => item.id === recipientKeyId && item.status === "active");
+  if (!active) {
+    const error = new Error("相手の受信用公開鍵が変わっています。表示を確認してから共有してください。");
+    error.code = "key_changed";
+    throw error;
+  }
+  const version = expectedVersion + 1;
+  const aad = hpkeAad({
+    purpose: "family",
+    contextId: shareId,
+    ownerId: vault.userId,
+    recipientId: recipientUserId,
+    keyId: recipientKeyId,
+    version,
+  });
+  const sealed = await hpkeSeal(b64urlToBytes(active.public_key), new TextEncoder().encode(JSON.stringify(payload)), aad);
+  const owner = await encryptOwnerCopy({
+    storageKey: vault.storageKey,
+    dataKeyId: vault.dataKeyId,
+    shareId,
+    version,
+    plaintext: new TextEncoder().encode(JSON.stringify(payload)),
+  });
+  return api(`/api/v1/family/shares/${shareId}/update`, {
+    method: "POST",
+    body: {
+      expected_version: expectedVersion,
+      recipient_key_id: recipientKeyId,
       confirmed: true,
       version: { hpke_enc: bytesToB64url(sealed.enc), ciphertext: bytesToB64url(sealed.ciphertext) },
       owner_copy: {
@@ -455,11 +552,19 @@ export async function openOwnerCopy(share) {
   return JSON.parse(new TextDecoder().decode(opened));
 }
 
-export async function createQrShare({ mode, expiresAt = null }) {
+async function selectedPayload(selection) {
+  const catalog = await api("/api/v1/answers/questions");
+  const loaded = await loadAnswerDocument();
+  return plaintextForSelection(loaded.document, catalog, selection);
+}
+
+export async function createQrShare({ mode, expiresAt = null, selection }) {
+  if (!vault.storageKey || !vault.userId) throw new Error("先にパスキーで鍵を解除してください。");
   const pair = await generateHpkeKeyPair();
   const shareId = randomShareId();
   const startToken = randomBytes(32);
   const tokenHash = new Uint8Array(await crypto.subtle.digest("SHA-256", startToken));
+  const payload = await selectedPayload(selection);
   const aad = hpkeAad({
     purpose: "qr",
     contextId: shareId,
@@ -468,8 +573,7 @@ export async function createQrShare({ mode, expiresAt = null }) {
     keyId: bytesToB64url(pair.publicKey),
     version: 1,
   });
-  const document = await loadAnswerDocument();
-  const sealed = await hpkeSeal(pair.publicKey, new TextEncoder().encode(JSON.stringify(document || { schema: 1, items: {} })), aad);
+  const sealed = await hpkeSeal(pair.publicKey, new TextEncoder().encode(JSON.stringify(payload)), aad);
   const created = await api("/api/v1/qr-shares", {
     method: "POST",
     body: {
@@ -484,7 +588,50 @@ export async function createQrShare({ mode, expiresAt = null }) {
   return {
     share: created.share,
     url: createShareUrl({ origin: location.origin, shareId, privateKey: pair.privateKey, startToken }),
+    privateKey: pair.privateKey,
+    startToken,
   };
 }
 
-export { createShareUrl, detectPrf, selectedShareItems };
+export async function updateQrShare({ shareId, expectedVersion, publicKey, selection }) {
+  if (!vault.storageKey || !vault.userId) throw new Error("先にパスキーで鍵を解除してください。");
+  if (!Number.isInteger(expectedVersion) || expectedVersion < 1) {
+    throw new Error("更新するQRの版が指定されていません。");
+  }
+  const payload = await selectedPayload(selection);
+  const version = expectedVersion + 1;
+  const aad = hpkeAad({
+    purpose: "qr",
+    contextId: shareId,
+    ownerId: vault.userId,
+    recipientId: "qr",
+    keyId: publicKey,
+    version,
+  });
+  const sealed = await hpkeSeal(b64urlToBytes(publicKey), new TextEncoder().encode(JSON.stringify(payload)), aad);
+  return api(`/api/v1/qr-shares/${shareId}/update`, {
+    method: "POST",
+    body: {
+      expected_version: expectedVersion,
+      version: { hpke_enc: bytesToB64url(sealed.enc), ciphertext: bytesToB64url(sealed.ciphertext) },
+    },
+  });
+}
+
+export async function confirmMigrationAccess(migrationId, deps = {}) {
+  const unlockFn = deps.unlock || unlock;
+  const loadFn = deps.loadAnswerDocument || loadAnswerDocument;
+  const listFn = deps.listReceived || (() => api("/api/v1/family/received"));
+  const openFn = deps.openReceivedShare || openReceivedShare;
+  const acknowledge = deps.acknowledge || ((id) => api(`/api/v1/transfer/${id}/decrypt-confirmed`, { method: "POST", body: {} }));
+  await unlockFn();
+  const loaded = await loadFn();
+  const received = await listFn();
+  const shares = received.shares || [];
+  for (const share of shares) await openFn(share);
+  await acknowledge(migrationId);
+  const items = loaded.document && loaded.document.items ? loaded.document.items : {};
+  return { revision: loaded.revision, answerCount: Object.keys(items).length, shareCount: shares.length };
+}
+
+export { createShareUrl, detectPrf, openMigrationRecords, plaintextForSelection };

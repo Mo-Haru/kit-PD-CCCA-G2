@@ -99,7 +99,7 @@ $env:PIPENV_VENV_IN_PROJECT = "1"
 py -3.14 -m pipenv install --dev --python 3.14
 Copy-Item .env.example .env
 py -3.14 -m pipenv run python -m flask --app run init-db
-py -3.14 -m pipenv run python -m flask --app run run --debug
+py -3.14 -m pipenv run python -m flask --app run run --debug --host localhost --port 5000
 ```
 
 `py` が使えない場合は、`python --version` が 3.14 系であることを確認したうえで、`py -3.14` を `python` に置き換えます。
@@ -112,7 +112,7 @@ python -m pipenv install --dev --python 3.14
 
 `.env` のコピーは省略できます。省略しても、開発用の暫定値（SQLite とダミーの `SECRET_KEY`）で起動します。設定を変えるときだけ `.env` を編集します。`.env.example` に秘密情報は入っていません。
 
-`init-db` は、登録済みの19モデルのうち未作成のテーブルを作ります。既存のテーブルや行は削除せず、既存テーブルの構造も変更しません。このコマンドを二回実行しても、既存データは消えません。
+`init-db` は、未作成のテーブルを作り、その後 `app/schema_upgrade.py` の未適用手順だけを実行します。既存の行は削除しません。列の追加や、チャレンジ用途の許可値を広げる手順は、既存行をコピーして残します。このコマンドを二回実行しても、既存データは消えません。
 
 同じウィンドウで仮想環境に入ってから短くすることもできます。
 
@@ -120,7 +120,7 @@ python -m pipenv install --dev --python 3.14
 $env:PIPENV_VENV_IN_PROJECT = "1"
 py -3.14 -m pipenv shell
 python -m flask --app run init-db
-python -m flask --app run run --debug
+python -m flask --app run run --debug --host localhost --port 5000
 ```
 
 `pipenv shell` が止まった場合は、実行ポリシーを変更せず、`py -3.14 -m pipenv run ...` の形を使ってください。
@@ -134,31 +134,35 @@ $env:PIPENV_VENV_IN_PROJECT = "1"
 py -3.14 -m pipenv run python -m pytest
 ```
 
+pytest は Node.js も使います。`tests/browser_crypto.mjs` と `tests/page_flows.mjs` が、ブラウザ内と同じ暗号関数を実行します。Node.js が無いと、そのテストは失敗します。
+
 ## 起動できたかの確認
 
-開発サーバーは `http://127.0.0.1:5000/` で待ち受けます。
+パスキーのRP IDは `localhost`、originは `http://localhost:5000` です。ブラウザで開くURLもこれにしてください。`http://127.0.0.1:5000/` は別のoriginなので、パスキー登録は失敗します。ポートを変えたときは `.env` の `WEBAUTHN_ORIGIN` も同じURLにします。
 
 | URL | 正常なとき |
 | --- | --- |
-| http://127.0.0.1:5000/ | 「意思の記録」と、回答・共有・認証へのリンクが見える |
-| http://127.0.0.1:5000/hello | 本文が `Hello, World!` |
-| http://127.0.0.1:5000/answers | 「未実装」と表示され、保存は実行できない |
-| http://127.0.0.1:5000/sharing | 「未実装」と表示され、共有操作は実行できない |
-| http://127.0.0.1:5000/auth | 「未実装」と表示され、ログインした状態にならない |
-| http://127.0.0.1:5000/health | JSON で `status` と `database` がどちらも `ok` |
+| http://localhost:5000/ | 「意思の記録」と、回答・共有・認証・家族・移行へのリンクが見える |
+| http://localhost:5000/hello | 本文が `Hello, World!` |
+| http://localhost:5000/answers | 回答入力は「未実装」。保存APIは別で、`docs/morishita.md` の契約を使う |
+| http://localhost:5000/sharing | QR画像は「未実装」。閲覧開始APIは別 |
+| http://localhost:5000/auth | パスキーの登録、ログイン、鍵の解除ができる |
+| http://localhost:5000/family | この画面でログインし、鍵を解除してから家族共有を作れる |
+| http://localhost:5000/transfer | この画面でログインし、鍵を解除してから端末移行を進められる |
+| http://localhost:5000/health | JSON で `status` と `database` がどちらも `ok` |
 
 `/hello` は、以前の単一ファイルのアプリが返していた確認用の応答です。HTML の画面ではなく、本文 `Hello, World!` をそのまま返します。
 
-画面上部に、保存・認証・暗号化・共有が未実装である旨が出ます。未実装のボタンは押せません。認証できたように見せる画面や、暗号化できたように見せる処理はありません。
+画面上部には、回答の入力画面とQRコードの画像表示が未実装であり、パスキー、家族共有、QRの閲覧、端末移行は使える旨が出ます。未実装のボタンは押せません。
 
-ポート 5000 が使用中のときは、次でポートを変えます。
+ポート 5000 が使用中のときは、次でポートを変え、`.env` の `WEBAUTHN_ORIGIN` を `http://localhost:5001` にします。
 
 ```powershell
 $env:PIPENV_VENV_IN_PROJECT = "1"
-py -3.14 -m pipenv run python -m flask --app run run --debug --port 5001
+py -3.14 -m pipenv run python -m flask --app run run --debug --host localhost --port 5001
 ```
 
-その場合の URL は `http://127.0.0.1:5001/` です。
+その場合の URL は `http://localhost:5001/` です。
 
 ターミナルの日本語が文字化けするときは、そのウィンドウで `chcp 65001` を実行してから起動し直してください。
 
@@ -324,7 +328,7 @@ push のあと、GitHub のリポジトリページで **Compare & pull request*
 
 ## 実装済みと、まだ未実装のもの
 
-パスキー、ブラウザ内の暗号、家族共有、QRの閲覧セッション、端末移行は使えます。接続方法は `docs/morishita.md` です。回答の入力画面、坂担当のQR画像、小橋担当のLINEは未実装のままです。
+パスキー、ブラウザ内の暗号、家族共有、QRの閲覧セッション、端末移行は使えます。接続方法は `docs/morishita.md` です。回答の入力画面（今牧）、ノートと履歴（沖、`note/`）、坂担当のQR画像、小橋担当のLINEは未実装のままです。森下側の画面からは変更しません。
 
 | 機能 | 状態 | 場所 |
 | --- | --- | --- |
@@ -360,12 +364,14 @@ push のあと、GitHub のリポジトリページで **Compare & pull request*
 次の確認は Linux 上の Python 3.14.8 と Pipenv 2026.9.1 で行いました。仮想環境は `PIPENV_VENV_IN_PROJECT=1` によりリポジトリ内の `.venv` に作り、`python3.14 -m pipenv install --dev --python 3.14` で依存を入れています。Windows での起動確認はまだです。PowerShell の `py -3.14 -m pipenv` は、この Linux 環境では `python3.14 -m pipenv` に読み替えて確認しています。
 
 - `Pipfile` から Flask 3.1.3、Flask-SQLAlchemy 3.1.1、python-dotenv 1.2.4、pytest 9.1.1 をインストールできる
-- `python -m pytest` は 16 件成功する
+- `python -m pytest` は 61 件成功する。Node.js が暗号テストを実行する
 - `instance/dev.db` に確認用の行を入れてから `init-db` を 2 回実行し、その行が残る
-- `http://127.0.0.1:5000/` で起動し、`/`、`/hello`、`/answers`、`/sharing`、`/auth`、`/health` が 200 になる
-- `/` は「意思の記録」と「未実装」を表示する
+- `http://localhost:5000/` で起動し、`/`、`/hello`、`/answers`、`/sharing`、`/auth`、`/family`、`/transfer`、`/health` が 200 になる
+- `/` は「意思の記録」を表示する
 - `/hello` の本文は `Hello, World!`
-- `/answers`、`/sharing`、`/auth` は「未実装」と「この操作は実行できません」を表示する
+- `/answers` と `/sharing` の画面操作は未実装のまま
+- `/auth`、`/family`、`/transfer` はパスキーと共有、移行の画面を返す
 - `/health` は `status` と `database` がどちらも `ok`
+- 実機のパスキーとPRFは未確認。テストは模擬パスキーとNode上の暗号関数
 
 Windows でまだ見るものは、`py -3.14` の有無、`py -3.14 -m pip install --user pipenv`、`$env:PIPENV_VENV_IN_PROJECT = "1"`、コンソールの文字コード、ブラウザでの画面表示です。

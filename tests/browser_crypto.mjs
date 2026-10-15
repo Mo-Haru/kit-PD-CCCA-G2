@@ -33,8 +33,9 @@ const document = {
     hidden: { state: "declined" },
   },
 };
-const selected = selectedShareItems(document, ["keep"]);
+const selected = selectedShareItems(document, ["keep", "missing"]);
 check("unselected item omitted", !Object.hasOwn(selected.items, "hidden") && selected.items.keep.state === "answered");
+check("selected gap is unanswered", selected.items.missing.state === "unanswered");
 
 const url = createShareUrl({
   origin: "http://localhost",

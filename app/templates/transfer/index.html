@@ -6,8 +6,11 @@
 {% block content %}
   <div class="sensitive">
     <h1>端末移行</h1>
-    <p>古いパスキーは、新しい端末が鍵束を復号し、新しいパスキーの登録を確認するまで無効化しません。</p>
+    <p>別の画面へ移ると鍵は破棄されます。古いパスキーは、この画面で新しいパスキーによる解錠と既存データの復号を確認し、最後に完了を押したときだけ無効になります。</p>
+    <p id="lock-state">状態を確認しています。</p>
     <p id="status" role="status" aria-live="polite"></p>
+    <button id="login-here" type="button">この画面でログイン</button>
+    <button id="unlock-here" type="button">この画面で鍵を解除</button>
     <h2>今の端末</h2>
     <button id="source-start" type="button">移行を開始</button>
     <p>移行ID: <span id="source-id"></span></p>
@@ -25,7 +28,9 @@
     <p>照合コード: <strong id="target-code"></strong></p>
     <p>指紋: <strong id="target-fingerprint"></strong></p>
     <button id="target-finish" type="button">鍵束を復号してパスキーを登録</button>
-    <button id="target-finalize" type="button">新しいパスキーでログイン済みなら移行を完了</button>
+    <button id="target-confirm" type="button">新しいパスキーで既存データを復号確認</button>
+    <p id="confirm-result"></p>
+    <button id="target-finalize" type="button">復号できたので古いパスキーを無効化する</button>
   </div>
   <script type="module" src="{{ url_for('static', filename='js/watashi/transfer.mjs') }}"></script>
 {% endblock %}

@@ -138,10 +138,147 @@ export function buildAnswerDocument(items) {
 
 export function selectedShareItems(document, selectedIds) {
   const items = {};
+  const source = document && document.items && typeof document.items === "object" ? document.items : {};
   for (const id of selectedIds) {
-    if (Object.prototype.hasOwnProperty.call(document.items, id)) items[id] = document.items[id];
+    if (Object.prototype.hasOwnProperty.call(source, id)) items[id] = source[id];
+    else items[id] = { state: "unanswered" };
   }
   return { schema: 1, items };
+}
+
+function cleanSelectionIds(ids) {
+  if (!Array.isArray(ids)) {
+    throw new Error("共有範囲のIDが正しくありません。全体共有にはしません。");
+  }
+  const unique = [];
+  const seen = new Set();
+  for (const id of ids) {
+    if (typeof id !== "string" || id.trim() === "") {
+      throw new Error("共有範囲のIDが正しくありません。全体共有にはしません。");
+    }
+    if (!seen.has(id)) {
+      seen.add(id);
+      unique.push(id);
+    }
+  }
+  return unique;
+}
+
+export function expandShareSelection(catalog, selection) {
+  if (!selection || typeof selection !== "object" || Array.isArray(selection)) {
+    throw new Error("共有範囲を指定してください。未指定のときは全体を共有しません。");
+  }
+  const questions = Array.isArray(catalog?.questions) ? catalog.questions : [];
+  if (selection.scope === "all") {
+    if (selection.ids !== undefined) {
+      throw new Error("全体を選ぶときは項目IDを併記できません。");
+    }
+    if (questions.length === 0) throw new Error("共有できる質問がありません。");
+    return questions.map((item) => item.id);
+  }
+  if (selection.scope === "chapters") {
+    const ids = cleanSelectionIds(selection.ids);
+    if (ids.length === 0) throw new Error("共有する章を選んでください。空の指定は全体共有になりません。");
+    const known = new Set(questions.map((item) => item.category_id));
+    for (const id of ids) {
+      if (!known.has(id)) throw new Error("存在しない章が含まれています。全体共有にはしません。");
+    }
+    const selected = questions.filter((item) => ids.includes(item.category_id)).map((item) => item.id);
+    if (selected.length === 0) throw new Error("選んだ章に質問がありません。");
+    return selected;
+  }
+  if (selection.scope === "questions") {
+    const ids = cleanSelectionIds(selection.ids);
+    if (ids.length === 0) throw new Error("共有する質問を選んでください。空の指定は全体共有になりません。");
+    const known = new Set(questions.map((item) => item.id));
+    for (const id of ids) {
+      if (!known.has(id)) throw new Error("存在しない質問が含まれています。全体共有にはしません。");
+    }
+    return ids;
+  }
+  throw new Error("共有範囲の指定が正しくありません。全体共有にはしません。");
+}
+
+export function plaintextForSelection(document, catalog, selection) {
+  const ids = expandShareSelection(catalog, selection);
+  const source = document && document.items ? document : { schema: 1, items: {} };
+  return selectedShareItems(source, ids);
+}
+
+function valueText(value) {
+  if (Array.isArray(value)) return value.map((part) => valueText(part)).join("、");
+  if (value && typeof value === "object") return JSON.stringify(value);
+  if (value === null || value === undefined) return "";
+  return String(value);
+}
+
+export function presentAnswer(item) {
+  if (!item || typeof item !== "object") return { stateLabel: "未回答", valueText: "未回答" };
+  if (item.state === "undecided") return { stateLabel: "未定", valueText: "未定" };
+  if (item.state === "declined") return { stateLabel: "回答しない", valueText: "回答しない" };
+  if (item.state === "unanswered") return { stateLabel: "未回答", valueText: "未回答" };
+  if (item.state === "answered") return { stateLabel: "回答", valueText: valueText(item.value) };
+  return { stateLabel: "未回答", valueText: "未回答" };
+}
+
+export function entriesFromPayload(payload, catalog) {
+  const names = new Map();
+  for (const question of catalog?.questions || []) names.set(question.id, question.text || question.id);
+  const items = payload && payload.items && typeof payload.items === "object" ? payload.items : {};
+  return Object.keys(items).map((id) => ({
+    id,
+    label: names.get(id) || id,
+    ...presentAnswer(items[id]),
+  }));
+}
+
+export function fillAnswerList(parent, entries) {
+  parent.replaceChildren();
+  for (const entry of entries) {
+    const row = parent.ownerDocument.createElement("p");
+    row.textContent = `${entry.label}：${entry.stateLabel}／${entry.valueText}`;
+    parent.append(row);
+  }
+}
+
+export async function openMigrationRecords({
+  storageKey, userId, answer, shares, receivePrivate, receiveKeyId,
+}) {
+  let document = null;
+  if (answer && answer.document) {
+    const opened = await decryptDocument({
+      storageKey,
+      dataKeyId: answer.document.data_key_id,
+      userId,
+      revision: answer.document.revision,
+      schema: answer.document.schema_version,
+      nonce: b64urlToBytes(answer.document.nonce),
+      ciphertext: b64urlToBytes(answer.document.ciphertext),
+    });
+    document = JSON.parse(new TextDecoder().decode(opened));
+  }
+  const received = [];
+  for (const share of shares || []) {
+    if (receiveKeyId && share.recipient_key_id !== receiveKeyId) {
+      throw new Error("この共有は別の受信用鍵で包まれています。");
+    }
+    const aad = hpkeAad({
+      purpose: "family",
+      contextId: share.id,
+      ownerId: share.owner_user_id,
+      recipientId: userId,
+      keyId: share.recipient_key_id,
+      version: share.current_version,
+    });
+    const opened = await hpkeOpen(
+      receivePrivate,
+      b64urlToBytes(share.current.hpke_enc),
+      b64urlToBytes(share.current.ciphertext),
+      aad,
+    );
+    received.push(JSON.parse(new TextDecoder().decode(opened)));
+  }
+  return { document, received };
 }
 
 export function createShareUrl({ origin, shareId, privateKey, startToken }) {

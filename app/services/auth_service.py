@@ -583,6 +583,45 @@ def finish_add_passkey(body: dict) -> ActionResult:
     return ActionResult({"passkey_id": passkey.id, "data_key_id": data_key.id})
 
 
+def begin_passkey_proof(passkey_id: str) -> ActionResult:
+    user, session_row, _current = load_login()
+    require_reauth(session_row)
+    passkey = db.session.get(PasskeyCredential, passkey_id)
+    if passkey is None or passkey.user_id != user.id or passkey.revoked_at is not None:
+        fail("not_found", 404, "パスキーが見つかりません。", actor_id=user.id)
+    wrapped = _envelope_for(passkey)
+    if wrapped is None:
+        fail("key_unavailable", 409, "このパスキーで解除できる鍵が見つかりません。", actor_id=user.id)
+    result = _start_challenge(
+        "prove_passkey", user.id, {"passkey_id": passkey.id}, wrapped.prf_input, False, [passkey.credential_id],
+    )
+    result.body["envelope"] = envelope_view(wrapped)
+    return result
+
+
+def finish_passkey_proof(passkey_id: str, body: dict) -> dict:
+    enforce_rate("auth_verify")
+    expect_fields(body, {"credential"})
+    user, session_row, _current = load_login()
+    require_reauth(session_row)
+    passkey = db.session.get(PasskeyCredential, passkey_id)
+    if passkey is None or passkey.user_id != user.id or passkey.revoked_at is not None:
+        fail("not_found", 404, "パスキーが見つかりません。", actor_id=user.id)
+    challenge = consume_challenge("prove_passkey", user_id=user.id)
+    if challenge.request_options.get("passkey_id") != passkey.id:
+        fail("webauthn_invalid", 400, "パスキーの検証に失敗しました。", actor_id=user.id)
+    credential = _credential(body)
+    _user_handle_matches(credential, user)
+    verified = _verify_assertion(credential, challenge.challenge, passkey.public_key, passkey.sign_count)
+    if not _same_bytes(verified.credential_id, passkey.credential_id):
+        fail("webauthn_invalid", 400, "パスキーの検証に失敗しました。", actor_id=user.id)
+    passkey.sign_count = int(verified.new_sign_count)
+    passkey.last_used_at = utcnow()
+    audit("passkey_proved", "passkey", passkey.id, "success", actor_id=user.id)
+    db.session.commit()
+    return {"ok": True, "passkey_id": passkey.id}
+
+
 def disable_passkey(passkey_id: str, body: dict) -> ActionResult:
     expect_fields(body, {"confirm_last"})
     user, session_row, current = load_login()

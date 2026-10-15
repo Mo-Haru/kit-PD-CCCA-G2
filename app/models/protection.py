@@ -326,6 +326,7 @@ class DeviceMigration(IdentityMixin, CreatedMixin, Model):
     bundle_ciphertext: Mapped[bytes | None] = mapped_column(LargeBinary)
     target_passkey_id: Mapped[str | None] = mapped_column(ForeignKey("passkey_credentials.id"))
     source_approved_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    decrypt_confirmed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), index=True)
     finalized_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
 

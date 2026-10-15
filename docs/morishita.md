@@ -1,6 +1,6 @@
 # パスキー、家族共有、QR閲覧、端末移行
 
-この文書は、今牧（回答入力）、坂（QRの画像）、小橋（LINE）、大城（ノートと履歴）が、森下担当のAPIとブラウザ暗号を呼ぶときの契約です。サーバーは回答の平文、パスキーの秘密鍵、PRFの出力、HPKEの秘密鍵、完全なQR URLを受け取りません。
+この文書は、今牧（回答入力）、坂（QRの画像）、小橋（LINE）、沖（ノートと履歴）が、森下担当のAPIとブラウザ暗号を呼ぶときの契約です。サーバーは回答の平文、パスキーの秘密鍵、PRFの出力、HPKEの秘密鍵、完全なQR URLを受け取りません。
 
 画面は次のとおりです。
 
@@ -20,13 +20,27 @@
 主な関数:
 
 - `registerAccount(displayName)` / `login()` / `unlock()` / `logout()` / `addPasskey()`
-- `saveAnswerDocument(items)` / `loadAnswerDocument()`
-- `createFamilyShare({ connectionId, recipientUserId, recipientKeyId, selectedIds, expiresAt })`
+- `loadAnswerDocument()` は `{ revision, document }` を返す。文書が無いときは `{ revision: 0, document: null }`
+- `saveAnswerDocument(items, expectedRevision)` は、編集を始めた `revision` を第2引数に取る。省略すると保存しない
+- `createFamilyShare({ connectionId, recipientUserId, recipientKeyId, selection, expiresAt })`
+- `updateFamilyShare({ shareId, expectedVersion, recipientUserId, recipientKeyId, selection })`
 - `openReceivedShare(share)` / `openOwnerCopy(share)`
-- `createQrShare({ mode, expiresAt })` は `{ share, url }` を返す。`url` の秘密は fragment だけに入る
+- `createQrShare({ mode, expiresAt, selection })` は `{ share, url, privateKey, startToken }` を返す。`url` の秘密は fragment だけに入る
+- `updateQrShare({ shareId, expectedVersion, publicKey, selection })`
+- `confirmMigrationAccess(migrationId)` は、新しいパスキーで解錠してから既存データと受信共有を復号し、成功したときだけ確認APIを呼ぶ
+- `getUnlockState()` はログインと、このページのメモリ上で鍵が解けているかを分ける
 - `detectPrf()` が `supported: false` のとき、登録を始めない
 
-`items` の形は `{ 質問ID: { state, value } }` です。`state` は `answered`、`undecided`、`declined` です。オブジェクトに無いIDは未回答で、`undecided`（未定）や `declined`（回答しない）とは別です。選択していない項目は共有ペイロードに入れません。
+`items` の形は `{ 質問ID: { state, value } }` です。保存文書の `state` は `answered`、`undecided`、`declined` です。オブジェクトに無いIDは未回答で、`undecided`（未定）や `declined`（回答しない）とは別です。
+
+共有範囲 `selection` は次のどちらかです。
+
+- `{ scope: "all" }`。質問IDは付けません
+- `{ scope: "chapters", ids: [章ID, ...] }` または `{ scope: "questions", ids: [質問ID, ...] }`
+
+未指定、空配列、存在しないIDはエラーです。全体共有へは読み替えません。選択した質問だけを暗号文に入れます。保存文書に無い選択済みの質問は、共有平文では `{ state: "unanswered" }` です。選択していない質問は入れません。配列の値はそのまま残します。
+
+鍵はページごとのメモリにだけあります。別ページへ移ると消えます。`localStorage`、Cookie、URL、サーバーへは置きません。暗号操作の前に、そのページで `login()` と `unlock()` を呼びます。再認証は15分です。切れたら選択内容を残したまま、同じページで `unlock()` をやり直します。
 
 変更するAPIは、Cookieの `wn_csrf` を `X-CSRF-Token` に載せてください。Cookieは `/auth` や `/api/` を開いた応答で付きます。`HttpOnly` ではありません。セッションCookie `wn_session` は `HttpOnly` です。登録とログインの options、QRの start、移行の bind だけCSRFを免除しています。
 
@@ -57,7 +71,7 @@ HKDFのsaltは、パスキーの包みでは封筒の `kdf_salt`、それ以外�
 3. `POST /api/v1/auth/register/verify` に `credential`、`envelope`、`encryption_public_key`、`key_bundle`。封筒は `prf_input`、`kdf_salt`、`wrapped_key`（48バイト）、`nonce`、`kdf_version: 1`、`crypto_version: 1` です。
 4. ログインは `POST /api/v1/auth/login/options` と `login/verify` です。ログインだけでは保管用鍵は解けません。
 5. `POST /api/v1/auth/unlock/options` と `unlock/verify` で、同じパスキーのPRFから解きます。共有や移行の開始には、この再認証が15分必要です。
-6. `POST /api/v1/auth/passkeys/options` と `passkeys/verify` でパスキーを追加します。古いパスキーは残ります。追加する側は、今の保管用鍵を新しいPRF出力で包みます。
+6. `POST /api/v1/auth/passkeys/options` と `passkeys/verify` でパスキーを追加します。その後、同じパスキーで `POST /api/v1/auth/passkeys/<id>/proof/options` と `proof/verify` を行い、今の保管用鍵を再び開けることを確認します。確認前は追加済みとして扱いません。確認に失敗した追加は無効化します。古いパスキーは残ります。
 7. `POST /api/v1/auth/passkeys/<id>/disable` です。最後の1件は `{ "confirm_last": true }` が無いと409 `last_passkey` です。無効化しても、同期パスキーのコピーや相手が保存した共有は消えません。
 8. `GET /api/v1/auth/session` は未ログインでも200で `{ "authenticated": false }` です。
 
@@ -71,9 +85,28 @@ HKDFのsaltは、パスキーの包みでは封筒の `kdf_salt`、それ以外�
 
 `GET /api/v1/answers/current` は自分の最新版だけです。無ければ `{ "revision": 0, "document": null }` です。
 
-`PUT /api/v1/answers/current` の本体は `expected_revision`、`data_key_id`、`nonce`、`ciphertext`、`crypto_version`、`schema_version` だけです。`expected_revision` が現在の版と違うときは409 `revision_conflict` で、最新版は上書きしません。平文の項目名を足すと400になり、その値は応答と監査ログへ書きません。
+`PUT /api/v1/answers/current` の本体は `expected_revision`、`data_key_id`、`nonce`、`ciphertext`、`crypto_version`、`schema_version` だけです。`expected_revision` が現在の版と違うとき、または同時INSERTで版が衝突したときは409 `revision_conflict` です。最新版は上書きしません。`expected_revision` が無いときは400 `invalid_revision` です。平文の項目名を足すと400になり、その値は応答と監査ログへ書きません。
 
-大城の履歴画面は、この最新版と、家族共有の `GET /api/v1/family/shares/<id>/history`（所有者だけ）を使います。履歴は所有者用の暗号文です。受信者には返しません。
+今牧の画面は、読み込んだ `revision` を編集中に保持し、保存時へそのまま渡します。保存直前に最新版を取り直して古い内容へ付け替えないでください。409のときは入力を捨てず、再読込と比較を案内します。
+
+```javascript
+import { loadAnswerDocument, saveAnswerDocument, unlock } from "/static/js/watashi/client.mjs";
+
+await unlock();
+const opened = await loadAnswerDocument();
+const editing = opened.revision;
+const items = opened.document ? opened.document.items : {};
+// ここで items を画面の状態として編集する。
+try {
+  await saveAnswerDocument(items, editing);
+} catch (error) {
+  if (error.status === 409) {
+    // items は残す。最新版を読み直して比べる案内を出す。自動では保存しない。
+  }
+}
+```
+
+沖のノート・履歴画面は、この最新版と、家族共有の `GET /api/v1/family/shares/<id>/history`（所有者だけ）を使います。履歴は所有者用の暗号文です。受信者には返しません。`note/` の画面はこの契約の接続先であり、森下側では変更しません。
 
 ## 家族共有
 
@@ -83,9 +116,9 @@ HKDFのsaltは、パスキーの包みでは封筒の `kdf_salt`、それ以外�
 
 共有の作成は `POST /api/v1/family/shares` です。`confirmed` が `true` でないと保存しません。`id` はクライアントが作ったUUIDで、暗号のAADに入れます。`recipient_key_id` が相手の現在の有効な鍵と違うときは409 `key_changed` と `current_key_id` を返し、新しい版は作りません。
 
-更新は `POST /api/v1/family/shares/<id>/update` に `expected_version` を付けます。回答を保存しても共有の版は変わりません。停止は `POST .../stop`、接続解除は `POST /api/v1/family/connections/<id>/disconnect` です。解除すると、その接続の共有は受信者から見えなくなります。相手がすでに復号して保存した内容は消せません。再接続しても、停止した共有は戻りません。新しい共有を作ってください。
+更新は `POST /api/v1/family/shares/<id>/update` に `expected_version` を付けます。回答を保存しても共有の版は変わりません。停止は `POST .../stop`、期限変更は `POST /api/v1/family/shares/<id>/expiry` に `{ "expires_at": "2026-10-16T00:00:00Z" }` または期限を消す `null` です。受信者の次の取得から反映されます。受信者はこのAPIを呼べません。接続解除は `POST /api/v1/family/connections/<id>/disconnect` です。送信者・受信者のどちらからでも解除でき、その接続の共有は受信者から見えなくなります。相手がすでに復号して保存した内容は消せません。再接続しても、停止した共有は戻りません。新しい共有を作ってください。
 
-受信者は `GET /api/v1/family/received` と `GET /api/v1/family/received/<id>` で現在の版だけを受け取ります。期限切れ、停止、切断のあとは404です。
+受信者は `GET /api/v1/family/received` と `GET /api/v1/family/received/<id>` で現在の版だけを受け取ります。期限切れ、停止、切断のあとは404です。`/family` では、復号した質問名と回答値を表示します。`answered` は値、`undecided` は「未定」、`declined` は「回答しない」、`unanswered` は「未回答」です。描画は `textContent` で行い、回答中のHTMLはスクリプトとして実行しません。確定前に、選択範囲の確認表示を出します。
 
 ## QR（坂）
 
@@ -95,13 +128,14 @@ HKDFのsaltは、パスキーの包みでは封筒の `kdf_salt`、それ以外�
 2. 共有IDは32バイトのbase64url（43文字）です。AADに入れるため、作成前に決めます。
 3. `POST /api/v1/qr-shares` に `id`、`mode`（`emergency` または `timed`）、`public_key`、`start_token_hash`（SHA-256）、`version`（`hpke_enc` と `ciphertext`）、期限付きなら `expires_at` を送ります。`private_key` や完全なURLは項目として拒否します。
 4. 表示するURLは `createShareUrl` の形です。`/view/<id>#k=<秘密鍵>&t=<開始トークン>`。
-5. 閲覧ページはfragmentを `sessionStorage` に移し、アドレスバーからは消します。`POST /api/v1/qr-shares/<id>/start` には `start_token` と `attempt_id` だけを送ります。秘密鍵は送りません。
-6. 成功すると `wn_qr` Cookieが付きます。これはアカウントのセッションではありません。`/api/v1/answers/current` には使えません。
-7. `GET /api/v1/qr-view/current` で現在の暗号文を取り、端末で復号します。ページを開いただけ、またはGETしただけでは緊急用QRは消費しません。startが消費します。
-8. 緊急用は最初の成功したattemptだけがセッションを得ます。同じattemptの再送は同じセッションです。別のattemptは409です。期限付きは、期限まで複数のセッションを作れます。
-9. 閲覧の絶対期限は30分で、再取得しても延びません。5分操作が無いとアイドル期限で切れます。
-10. 更新は `POST /api/v1/qr-shares/<id>/update` です。緊急用を消費したあとも、同じ鍵対で新しい版を復号できます。消費時刻は戻りません。
-11. 停止は `POST /api/v1/qr-shares/<id>/stop` です。以降の取得は失敗します。相手が保存済みの内容は消えません。
+5. 坂の表示UIは、`createQrShare` が返した `url` だけを画像にします。`privateKey` と `startToken` はサーバーへ送らず、画像の元データにも残しません。`selection` を省くと全体共有にはならず、関数が失敗します。共有前に `plaintextForSelection` で対象だけを確認できます。
+6. 閲覧ページはfragmentを `sessionStorage` に移し、アドレスバーからは消します。初回表示では開始しません。利用者が「内容を開く」を押したときだけ `POST /api/v1/qr-shares/<id>/start` に `start_token` と `attempt_id` を送ります。秘密鍵は送りません。
+7. 成功すると `wn_qr` Cookieが付きます。これはアカウントのセッションではありません。`/api/v1/answers/current` には使えません。
+8. 同じ共有の有効なセッションがある再読込は `GET /api/v1/qr-view/current` だけで復号します。通常の再表示では新しい start を呼びません。別の共有のセッションでは復号しません。
+9. 緊急用は最初の成功したattemptだけがセッションを得ます。同じattemptの再送は、無操作期限と絶対期限の内側なら同じセッションです。別のattemptは409です。期限付きは、QR自体の期限内なら複数のセッションを作れます。
+10. 閲覧の絶対期限は30分で、再取得しても再試行しても延びません。5分操作が無いとアイドル期限で切れます。切れたセッションは同じattemptでは復活しません。緊急用は消費済みのままなので、その後の新しいattemptも拒否します。期限付きは、QR自体が有効なら新しいattemptで別セッションを始められます。
+11. 更新は `POST /api/v1/qr-shares/<id>/update` です。緊急用を消費したあとも、同じ鍵対で新しい版を復号できます。消費時刻は戻りません。更新時の `selection` が狭ければ、新しい暗号文からも非対象は消えます。
+12. 停止は `POST /api/v1/qr-shares/<id>/stop`、期限付きの期限変更は `POST /api/v1/qr-shares/<id>/expiry` です。発行済みセッションの次の取得にも反映されます。相手が保存済みの内容は消えません。
 
 ## 端末移行
 
@@ -112,12 +146,19 @@ HKDFのsaltは、パスキーの包みでは封筒の `kdf_salt`、それ以外�
 3. 両方の画面に同じ照合コードと指紋が出ます。一致しなければ承認しません。
 4. 今の端末が `POST /api/v1/transfer/<id>/approve` に、手入力したコードと表示中の指紋を送ります。
 5. 解除済みの保管用鍵を、移行先の公開鍵でHPKEして `POST /api/v1/transfer/<id>/bundle` します。
-6. 新しい端末が bundle を復号し、`POST /api/v1/transfer/passkey/options` と `passkey/verify` でパスキーを登録します。
-7. その新しいパスキーでログインしたセッションが `POST /api/v1/transfer/<id>/finalize` に `{ "confirmed": true }` を送ったときだけ、古いパスキーと古いセッションを無効化します。
-8. `POST /api/v1/transfer/<id>/cancel` か期限切れでは、新しいパスキーだけを無効化し、古いパスキーは残します。完了フラグだけを送っても無効化しません。
+6. 新しい端末が bundle を復号し、`POST /api/v1/transfer/passkey/options` と `passkey/verify` でパスキーを登録します。登録とログインだけでは完了しません。
+7. その新しいパスキーでログインし、同じページで再認証します。`confirmMigrationAccess` が保管用鍵で既存の回答と、有効な受信共有を復号します。回答や共有が無いアカウントは空として扱いますが、保管用鍵を開ける確認は省略しません。平文はサーバーへ送りません。成功したときだけ `POST /api/v1/transfer/<id>/decrypt-confirmed` を呼びます。
+8. 再認証済みで、復号確認済みの新しいパスキーのセッションが `POST /api/v1/transfer/<id>/finalize` に `{ "confirmed": true }` を送ったときだけ、古いパスキーと、それで発行されたセッションを無効化します。サーバーは平文を読めないので、復号確認の申告内容を独立には検証しません。保証するのは、移行ID、アカウント、新旧のパスキー、新しいパスキーのセッション、再認証、旧端末の承認、期限、一回性です。
+9. 鍵束が壊れている、解錠できない、受信共有を復号できない、確認を押していない、期限切れ、別アカウント、別のパスキーでは、古いパスキーは残ります。`POST /api/v1/transfer/<id>/cancel` では新しいパスキーだけを無効化し、古いパスキーは残します。全パスキーを失ったときの運営復旧はありません。
 
 ## エラーと制限
 
 変更系の失敗は `{ "error", "message" }` です。メッセージに秘密や入力した平文は入れません。試行回数を超えると429 `rate_limited` で、アカウントやセッションは作りません。暗号文は256KiBまで、共有の版は30までです。
 
 監査ログには操作名、対象のID、成功または失敗、エラーコードだけを残します。PRF出力、平文、トークン、完全なURLは残しません。
+
+## テスト
+
+Pythonのテストは `python -m pytest` です。中で Node.js が `tests/browser_crypto.mjs` と `tests/page_flows.mjs` を実行します。前者はブラウザ暗号とPythonのHPKEが同じ暗号文を開けることを見ます。後者は、ページを開いただけではQRを開始しないこと、選択した項目だけが暗号文に入ること、古いrevisionを拒否すること、解錠失敗では移行を完了しないこと、壊れた共有では確認APIを呼ばないことを見ます。
+
+模擬パスキーは `tests/soft_passkey.py` です。実機のパスキー、PRF、Android、iOS、Windowsの認証器はこの環境では未確認です。未確認だからといって、平文やPRF出力をサーバーへ送る代替処理は入れていません。

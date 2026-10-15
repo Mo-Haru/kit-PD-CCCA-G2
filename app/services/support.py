@@ -329,9 +329,10 @@ def ciphertext_limit() -> int:
     return int(current_app.config["MAX_CIPHERTEXT_BYTES"])
 
 
-def commit_or_conflict(message: str = "同時に更新されたため、保存できませんでした。") -> None:
+def commit_or_conflict(message: str = "同時に更新されたため、保存できませんでした。",
+                       code: str = "conflict") -> None:
     try:
         db.session.commit()
     except IntegrityError as exc:
         db.session.rollback()
-        raise ApiError("conflict", 409, message) from exc
+        raise ApiError(code, 409, message) from exc

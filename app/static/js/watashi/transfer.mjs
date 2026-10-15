@@ -1,12 +1,15 @@
 import { b64urlToBytes, bytesToB64url } from "./bytes.mjs";
-import { api, registerTransferredPasskey, unlockedKeyMaterial } from "./client.mjs";
+import {
+  api, confirmMigrationAccess, getUnlockState, login, registerTransferredPasskey, unlock, unlockedKeyMaterial,
+} from "./client.mjs";
 import { generateHpkeKeyPair, hpkeAad, hpkeOpen, hpkeSeal } from "./crypto.mjs";
 
 const status = document.querySelector("#status");
-let sourceId = "";
+const SOURCE_KEY = "wn-transfer-source";
+let sourceId = sessionStorage.getItem(SOURCE_KEY) || "";
 let targetPrivate = null;
-let transferredStorageKey = null;
 let timer = 0;
+let decryptConfirmed = false;
 
 function show(text) {
   status.textContent = text;
@@ -18,9 +21,23 @@ async function fingerprintOf(bytes) {
   return hex.match(/.{4}/g).join(" ");
 }
 
+async function syncAccess() {
+  const session = await api("/api/v1/auth/session");
+  const unlocked = getUnlockState().unlocked;
+  const node = document.querySelector("#lock-state");
+  if (!session.authenticated) {
+    node.textContent = "ログインしていません。この画面でログインしてから、鍵を解除してください。";
+    return;
+  }
+  node.textContent = unlocked
+    ? `${session.display_name} としてログイン中です。この画面で鍵は解除されています。`
+    : `${session.display_name} としてログイン中です。鍵は未解除です。この画面で鍵を解除してください。`;
+}
+
 async function refreshSource() {
   if (!sourceId) return;
   const migration = (await api(`/api/v1/transfer/${sourceId}`)).migration;
+  document.querySelector("#source-id").textContent = sourceId;
   document.querySelector("#source-state").textContent = `${migration.status} / 期限 ${migration.expires_at}`;
   document.querySelector("#source-code").textContent = migration.confirmation_code || "まだありません";
   document.querySelector("#source-fingerprint").textContent = migration.fingerprint || "まだありません";
@@ -30,7 +47,7 @@ async function refreshSource() {
 async function uploadBundle(migration) {
   const material = unlockedKeyMaterial();
   if (!material || !migration.target_public_key) {
-    show("鍵束を送るには、認証画面で鍵を解除してから、この画面へ戻ってください。");
+    show("鍵束を送るには、この画面で鍵を解除してください。別の画面で解除しても、戻ると鍵は残っていません。");
     return;
   }
   const aad = hpkeAad({
@@ -54,14 +71,37 @@ async function uploadBundle(migration) {
     method: "POST",
     body: { hpke_enc: bytesToB64url(sealed.enc), ciphertext: bytesToB64url(sealed.ciphertext) },
   });
-  show("鍵束を送りました。古いパスキーは、新しい端末が復号とパスキー登録を終えるまで有効です。");
+  show("鍵束を送りました。古いパスキーは、新しい端末が復号確認と最終確定を終えるまで有効です。");
   window.clearInterval(timer);
 }
+
+document.querySelector("#login-here").addEventListener("click", async () => {
+  try {
+    await login();
+    decryptConfirmed = false;
+    show("ログインしました。鍵はまだ解除されていません。");
+    await syncAccess();
+  } catch (error) {
+    show(error.message || "ログインできませんでした。");
+  }
+});
+
+document.querySelector("#unlock-here").addEventListener("click", async () => {
+  try {
+    await unlock();
+    show("この画面で鍵を解除しました。");
+    await syncAccess();
+    await refreshSource();
+  } catch (error) {
+    show(error.message || "鍵を解除できませんでした。鍵は使える状態にしていません。");
+  }
+});
 
 document.querySelector("#source-start").addEventListener("click", async () => {
   try {
     const started = await api("/api/v1/transfer/start", { method: "POST", body: {} });
     sourceId = started.migration.id;
+    sessionStorage.setItem(SOURCE_KEY, sourceId);
     document.querySelector("#source-id").textContent = sourceId;
     show("移行を開始しました。新しい端末にこのIDを入力してください。");
     window.clearInterval(timer);
@@ -94,6 +134,7 @@ document.querySelector("#source-cancel").addEventListener("click", async () => {
   try {
     await api(`/api/v1/transfer/${sourceId}/cancel`, { method: "POST", body: {} });
     window.clearInterval(timer);
+    sessionStorage.removeItem(SOURCE_KEY);
     show("移行を取り消しました。古いパスキーはそのまま使えます。");
   } catch (error) {
     show(error.message);
@@ -151,22 +192,47 @@ document.querySelector("#target-finish").addEventListener("click", async () => {
       b64urlToBytes(packed.ciphertext),
       aad,
     )));
-    transferredStorageKey = b64urlToBytes(opened.storageKey);
-    await registerTransferredPasskey(transferToken, transferredStorageKey);
-    transferredStorageKey = null;
-    show("新しいパスキーを登録しました。認証画面でそのパスキーによりログインしてから、移行完了を押すと古いパスキーが無効になります。");
+    await registerTransferredPasskey(transferToken, b64urlToBytes(opened.storageKey));
+    decryptConfirmed = false;
+    show("新しいパスキーを登録しました。この画面でそのパスキーによりログインし、復号確認をしてから完了してください。古いパスキーはまだ有効です。");
   } catch (error) {
+    decryptConfirmed = false;
     show(error.message || "新しい端末での確認がまだできません。古いパスキーは無効化していません。");
+  }
+});
+
+document.querySelector("#target-confirm").addEventListener("click", async () => {
+  const migrationId = sessionStorage.getItem("wn-transfer-id") || document.querySelector("#target-id").value.trim();
+  decryptConfirmed = false;
+  try {
+    const result = await confirmMigrationAccess(migrationId);
+    decryptConfirmed = true;
+    document.querySelector("#confirm-result").textContent = `保管用鍵で既存データを開きました。回答 ${result.answerCount} 件、受信共有 ${result.shareCount} 件。内容はサーバーへ送っていません。`;
+    show("復号できました。問題なければ、古いパスキーの無効化を押してください。");
+  } catch (error) {
+    decryptConfirmed = false;
+    document.querySelector("#confirm-result").textContent = "";
+    show(error.message || "復号確認ができないため、古いパスキーは無効化していません。");
   }
 });
 
 document.querySelector("#target-finalize").addEventListener("click", async () => {
   const migrationId = sessionStorage.getItem("wn-transfer-id") || document.querySelector("#target-id").value.trim();
+  if (!decryptConfirmed) {
+    show("先に新しいパスキーで既存データを復号確認してください。ログインだけでは完了できません。");
+    return;
+  }
   try {
     await api(`/api/v1/transfer/${migrationId}/finalize`, { method: "POST", body: { confirmed: true } });
     sessionStorage.removeItem("wn-transfer-token");
+    decryptConfirmed = false;
     show("移行を完了しました。古いパスキーは無効です。");
   } catch (error) {
-    show(error.message || "まだ完了できません。新しいパスキーでログインしているか確認してください。");
+    show(error.message || "まだ完了できません。古いパスキーは無効化していません。");
   }
 });
+
+syncAccess().catch((error) => show(error.message));
+if (sourceId) {
+  refreshSource().catch((error) => show(error.message));
+}
