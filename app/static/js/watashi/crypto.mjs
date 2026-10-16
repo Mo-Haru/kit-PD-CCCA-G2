@@ -205,6 +205,13 @@ export function plaintextForSelection(document, catalog, selection) {
   return selectedShareItems(source, ids);
 }
 
+export function shareFingerprint(selection, payload) {
+  const items = payload && payload.items && typeof payload.items === "object" && !Array.isArray(payload.items)
+    ? payload.items
+    : {};
+  return JSON.stringify({ selection, items });
+}
+
 function valueText(value) {
   if (Array.isArray(value)) return value.map((part) => valueText(part)).join("、");
   if (value && typeof value === "object") return JSON.stringify(value);

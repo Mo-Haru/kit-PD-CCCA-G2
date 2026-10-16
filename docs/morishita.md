@@ -118,7 +118,9 @@ try {
 
 更新は `POST /api/v1/family/shares/<id>/update` に `expected_version` を付けます。回答を保存しても共有の版は変わりません。停止は `POST .../stop`、期限変更は `POST /api/v1/family/shares/<id>/expiry` に `{ "expires_at": "2026-10-16T00:00:00Z" }` または期限を消す `null` です。受信者の次の取得から反映されます。受信者はこのAPIを呼べません。接続解除は `POST /api/v1/family/connections/<id>/disconnect` です。送信者・受信者のどちらからでも解除でき、その接続の共有は受信者から見えなくなります。相手がすでに復号して保存した内容は消せません。再接続しても、停止した共有は戻りません。新しい共有を作ってください。
 
-受信者は `GET /api/v1/family/received` と `GET /api/v1/family/received/<id>` で現在の版だけを受け取ります。期限切れ、停止、切断のあとは404です。`/family` では、復号した質問名と回答値を表示します。`answered` は値、`undecided` は「未定」、`declined` は「回答しない」、`unanswered` は「未回答」です。描画は `textContent` で行い、回答中のHTMLはスクリプトとして実行しません。確定前に、選択範囲の確認表示を出します。
+受信者は `GET /api/v1/family/received` と `GET /api/v1/family/received/<id>` で現在の版だけを受け取ります。期限切れ、停止、切断のあとは404です。`/family` では、復号した質問名と回答値を表示します。`answered` は値、`undecided` は「未定」、`declined` は「回答しない」、`unanswered` は「未回答」です。描画は `textContent` で行い、回答中のHTMLはスクリプトとして実行しません。
+
+作成と更新のどちらも、先に「共有する内容を確認」で出した項目と、確定時の選択・回答が一致しているときだけ暗号化します。一致しないときはチェックを外し、表示を消して、もう一度確認するまで保存しません。確認済みの `payload` を `createFamilyShare` と `updateFamilyShare` に渡すと、そのバイト列をそのまま暗号文にします。渡したあとに回答を読み直して別の内容へ付け替えません。`payload` を省いた呼び出しは、その時点の `selection` だけを暗号化し、未指定を全体共有にはしません。
 
 ## QR（坂）
 
@@ -131,7 +133,7 @@ try {
 5. 坂の表示UIは、`createQrShare` が返した `url` だけを画像にします。`privateKey` と `startToken` はサーバーへ送らず、画像の元データにも残しません。`selection` を省くと全体共有にはならず、関数が失敗します。共有前に `plaintextForSelection` で対象だけを確認できます。
 6. 閲覧ページはfragmentを `sessionStorage` に移し、アドレスバーからは消します。初回表示では開始しません。利用者が「内容を開く」を押したときだけ `POST /api/v1/qr-shares/<id>/start` に `start_token` と `attempt_id` を送ります。秘密鍵は送りません。
 7. 成功すると `wn_qr` Cookieが付きます。これはアカウントのセッションではありません。`/api/v1/answers/current` には使えません。
-8. 同じ共有の有効なセッションがある再読込は `GET /api/v1/qr-view/current` だけで復号します。通常の再表示では新しい start を呼びません。別の共有のセッションでは復号しません。
+8. 同じ共有の有効なセッションがある再読込は `GET /api/v1/qr-view/current` だけで復号します。通常の再表示では新しい start を呼びません。別の共有のセッションでは復号しません。閲覧画面は共有内容、`updated_at`（共有の更新日時）、有効状態（有効・停止・期限切れ・使用済み）、終了操作を分けて出します。使用済み、期限切れ、停止、閲覧期限切れ、復号失敗は別の文言です。復号に失敗したときは内容を出しません。
 9. 緊急用は最初の成功したattemptだけがセッションを得ます。同じattemptの再送は、無操作期限と絶対期限の内側なら同じセッションです。別のattemptは409です。期限付きは、QR自体の期限内なら複数のセッションを作れます。
 10. 閲覧の絶対期限は30分で、再取得しても再試行しても延びません。5分操作が無いとアイドル期限で切れます。切れたセッションは同じattemptでは復活しません。緊急用は消費済みのままなので、その後の新しいattemptも拒否します。期限付きは、QR自体が有効なら新しいattemptで別セッションを始められます。
 11. 更新は `POST /api/v1/qr-shares/<id>/update` です。緊急用を消費したあとも、同じ鍵対で新しい版を復号できます。消費時刻は戻りません。更新時の `selection` が狭ければ、新しい暗号文からも非対象は消えます。
@@ -159,6 +161,6 @@ try {
 
 ## テスト
 
-Pythonのテストは `python -m pytest` です。中で Node.js が `tests/browser_crypto.mjs` と `tests/page_flows.mjs` を実行します。前者はブラウザ暗号とPythonのHPKEが同じ暗号文を開けることを見ます。後者は、ページを開いただけではQRを開始しないこと、選択した項目だけが暗号文に入ること、古いrevisionを拒否すること、解錠失敗では移行を完了しないこと、壊れた共有では確認APIを呼ばないことを見ます。
+Pythonのテストは `python -m pytest` です。中で Node.js が `tests/browser_crypto.mjs` と `tests/page_flows.mjs` を実行します。前者はブラウザ暗号とPythonのHPKEが同じ暗号文を開けることを見ます。後者は、ページを開いただけではQRを開始しないこと、選択した項目だけが暗号文に入ること、確認した項目と違う選択や回答では共有を確定しないこと、確認済みのバイト列を読み直して付け替えないこと、閲覧状態と復号失敗を分けて示すこと、古いrevisionを拒否すること、解錠失敗では移行を完了しないこと、壊れた共有では確認APIを呼ばないことを見ます。
 
 模擬パスキーは `tests/soft_passkey.py` です。実機のパスキー、PRF、Android、iOS、Windowsの認証器はこの環境では未確認です。未確認だからといって、平文やPRF出力をサーバーへ送る代替処理は入れていません。

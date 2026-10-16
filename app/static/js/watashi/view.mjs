@@ -12,6 +12,57 @@ import {
 } from "./crypto.mjs";
 
 const OPENED = "wn-qr-opened";
+const STATE_LABEL = {
+  active: "有効",
+  stopped: "停止",
+  expired: "期限切れ",
+  used: "使用済み",
+};
+
+export function viewFacts(current) {
+  const state = STATE_LABEL[current && current.status] || "不明";
+  const updated = current && current.updated_at ? current.updated_at : "不明";
+  return {
+    validity: `有効状態: ${state}`,
+    updated: `共有の更新日時: ${updated}`,
+  };
+}
+
+export function describeViewError(error) {
+  const code = error && error.code;
+  if (code === "qr_used") return "この緊急用QRは使用済みです。内容は表示できません。";
+  if (code === "qr_expired") return "このQRの期限が切れています。内容は表示できません。";
+  if (code === "qr_stopped") return "このQRは停止されています。内容は表示できません。";
+  if (code === "qr_session_expired") return "閲覧の期限が切れています。同じ手続きでは再開できません。";
+  if (code === "qr_denied") return "このQRでは閲覧を開始できません。";
+  if (code === "decrypt_failed") return "復号に失敗しました。内容は表示していません。";
+  if (error && error.message) return error.message;
+  return "閲覧を開始できませんでした。";
+}
+
+export async function openSharedPayload(privateKey, current, shareId) {
+  const aad = hpkeAad({
+    purpose: "qr",
+    contextId: shareId,
+    ownerId: current.owner_user_id,
+    recipientId: "qr",
+    keyId: current.public_key,
+    version: current.current_version,
+  });
+  try {
+    const opened = await hpkeOpen(
+      privateKey,
+      decode(current.version.hpke_enc),
+      decode(current.version.ciphertext),
+      aad,
+    );
+    return JSON.parse(new TextDecoder().decode(opened));
+  } catch (_error) {
+    const error = new Error("復号に失敗しました。内容は表示していません。");
+    error.code = "decrypt_failed";
+    throw error;
+  }
+}
 
 export function captureQrSecrets(storage, locationLike, shareId) {
   const parsed = parseShareFragment(locationLike.hash);
@@ -106,30 +157,34 @@ function bindPage() {
     status.textContent = text;
   }
 
+  function showFacts(current) {
+    const facts = viewFacts(current);
+    document.querySelector("#validity").textContent = facts.validity;
+    document.querySelector("#updated").textContent = facts.updated;
+  }
+
   async function render(current, secrets) {
-    const aad = hpkeAad({
-      purpose: "qr",
-      contextId: shareId,
-      ownerId: current.owner_user_id,
-      recipientId: "qr",
-      keyId: current.public_key,
-      version: current.current_version,
-    });
-    const opened = await hpkeOpen(
-      secrets.privateKey,
-      decode(current.version.hpke_enc),
-      decode(current.version.ciphertext),
-      aad,
-    );
-    showPayload(output, JSON.parse(new TextDecoder().decode(opened)));
+    showFacts(current);
+    const opened = await openSharedPayload(secrets.privateKey, current, shareId);
+    showPayload(output, opened);
     const absolute = current.session?.absolute_expires_at || "";
     show(`閲覧中です。絶対期限 ${absolute} は延長されません。`);
   }
 
+  let busy = false;
   async function openExplicit(secrets) {
-    const result = await resumeOrStartQr({ api, shareId, secrets, resumeOnly: false });
-    sessionStorage.setItem(OPENED, shareId);
-    await render(result.current, secrets);
+    if (busy) return;
+    busy = true;
+    const openButton = document.querySelector("#open");
+    openButton.disabled = true;
+    try {
+      const result = await resumeOrStartQr({ api, shareId, secrets, resumeOnly: false });
+      sessionStorage.setItem(OPENED, shareId);
+      await render(result.current, secrets);
+    } finally {
+      busy = false;
+      openButton.disabled = false;
+    }
   }
 
   const secrets = captureQrSecrets(sessionStorage, locationLike, shareId);
@@ -139,18 +194,24 @@ function bindPage() {
       return;
     }
     if (plan.action === "resume") {
-      await render(plan.result.current, secrets);
+      try {
+        await render(plan.result.current, secrets);
+      } catch (error) {
+        output.replaceChildren();
+        show(describeViewError(error));
+      }
       return;
     }
-    show(plan.error && plan.error.message ? plan.error.message : "内容を開くを押すまで、閲覧は開始しません。");
-  }).catch((error) => show(error.message || "閲覧を開始できませんでした。"));
+    show(plan.error ? describeViewError(plan.error) : "内容を開くを押すまで、閲覧は開始しません。");
+  }).catch((error) => show(describeViewError(error)));
 
   document.querySelector("#open").addEventListener("click", async () => {
     const currentSecrets = readQrSecrets(sessionStorage, shareId);
     try {
       await openExplicit(currentSecrets);
     } catch (error) {
-      show(error.message || "閲覧を開始できませんでした。");
+      output.replaceChildren();
+      show(describeViewError(error));
     }
   });
 
@@ -163,7 +224,8 @@ function bindPage() {
     try {
       await openExplicit(next);
     } catch (error) {
-      show(error.message || "新しい閲覧を開始できませんでした。緊急用QRは一度使うと再開できません。");
+      output.replaceChildren();
+      show(describeViewError(error));
     }
   });
 

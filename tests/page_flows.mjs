@@ -15,6 +15,7 @@ import {
   hpkeSeal,
   plaintextForSelection,
   presentAnswer,
+  shareFingerprint,
   wrapStorageKey,
 } from "../app/static/js/watashi/crypto.mjs";
 
@@ -115,9 +116,12 @@ globalThis.PublicKeyCredential = {
   async getClientCapabilities() { return { prf: true }; },
 };
 
-const { captureQrSecrets, loadQrPage, replaceAttempt, resumeOrStartQr } = await import("../app/static/js/watashi/view.mjs");
 const {
-  addPasskey, confirmMigrationAccess, createQrShare, loadAnswerDocument, saveAnswerDocument, unlock, updateQrShare,
+  captureQrSecrets, describeViewError, loadQrPage, openSharedPayload, replaceAttempt, resumeOrStartQr, viewFacts,
+} = await import("../app/static/js/watashi/view.mjs");
+const {
+  addPasskey, confirmMigrationAccess, createFamilyShare, createQrShare, loadAnswerDocument, saveAnswerDocument,
+  unlock, updateFamilyShare, updateQrShare,
 } = await import("../app/static/js/watashi/client.mjs");
 
 const shareId = "a".repeat(43);
@@ -166,6 +170,26 @@ const wrong = await loadQrPage({ api: qrApi, storage, shareId, secrets });
 check("another share is not reused", wrong.action === "wait" && wrong.error.code === "wrong_share" && qrCalls.every((item) => item.method === "GET"));
 const replaced = replaceAttempt(storage, shareId);
 check("a new attempt is distinct", replaced.attempt !== secrets.attempt);
+const facts = viewFacts({ status: "used", updated_at: "2026-10-16T00:00:00Z" });
+check("view separates validity and update time", facts.validity === "有効状態: 使用済み" && facts.updated === "共有の更新日時: 2026-10-16T00:00:00Z");
+check("used, expired, and stopped stay distinct", describeViewError({ code: "qr_used" }).includes("使用済み")
+  && describeViewError({ code: "qr_expired" }).includes("期限が切れ")
+  && describeViewError({ code: "qr_stopped" }).includes("停止"));
+let badCipher = false;
+try {
+  await openSharedPayload(privateKey, {
+    owner_user_id: "owner",
+    public_key: "not-the-key",
+    current_version: 1,
+    version: {
+      hpke_enc: bytesToB64url(crypto.getRandomValues(new Uint8Array(32))),
+      ciphertext: bytesToB64url(crypto.getRandomValues(new Uint8Array(32))),
+    },
+  }, shareId);
+} catch (error) {
+  badCipher = error.code === "decrypt_failed" && describeViewError(error).includes("復号に失敗");
+}
+check("bad ciphertext is a decrypt failure", badCipher);
 
 const userHandle = crypto.getRandomValues(new Uint8Array(32));
 const storageKey = crypto.getRandomValues(new Uint8Array(32));
@@ -332,6 +356,10 @@ globalThis.fetch = async (path, options = {}) => {
     disabled.push(path);
     return reply(200, { ok: true });
   }
+  if (path === "/api/v1/family/shares" && method === "POST") return reply(200, { share: { id: body.id, current_version: 1 } });
+  if (method === "POST" && /^\/api\/v1\/family\/shares\/[^/]+\/update$/.test(path)) {
+    return reply(200, { share: { current_version: body.expected_version + 1 } });
+  }
   if (path === "/api/v1/family/received") return reply(200, { shares: receivedShares });
   if (path.endsWith("/decrypt-confirmed")) {
     acknowledgements += 1;
@@ -463,6 +491,55 @@ try {
 check("failed proof disables the new passkey", proofFailed && disabled.some((path) => path.includes("/disable")));
 const afterFailure = await loadAnswerDocument();
 check("failed proof leaves the current key usable", afterFailure.document.items.no.state === "declined");
+
+const { confirmationStillMatches } = await import("../app/static/js/watashi/family.mjs");
+const previewSelection = { scope: "questions", ids: ["keep"] };
+const previewPayload = plaintextForSelection(stored, catalog, previewSelection);
+const previewKey = shareFingerprint(previewSelection, previewPayload);
+check("the previewed selection still matches", confirmationStillMatches(previewKey, previewSelection, previewPayload));
+check("a later selection is not already confirmed", !confirmationStillMatches(previewKey, { scope: "questions", ids: ["no"] }, previewPayload));
+check("changed answers are not already confirmed", !confirmationStillMatches(
+  previewKey,
+  previewSelection,
+  plaintextForSelection({ schema: 1, items: { keep: { state: "answered", value: "別の値" } } }, catalog, previewSelection),
+));
+check("an empty confirmation matches nothing", !confirmationStillMatches("", previewSelection, previewPayload));
+
+const confirmedPayload = plaintextForSelection(stored, catalog, { scope: "questions", ids: ["no"] });
+const familyLog = log.length;
+await createFamilyShare({
+  connectionId: "conn-1",
+  recipientUserId: "user-1",
+  recipientKeyId: "recv-1",
+  selection: { scope: "all" },
+  payload: confirmedPayload,
+});
+const familyPosted = log.slice(familyLog).find((item) => item.path === "/api/v1/family/shares" && item.method === "POST");
+const sealedFamily = JSON.parse(new TextDecoder().decode(await hpkeOpen(
+  receive.privateKey,
+  b64urlToBytes(familyPosted.body.version.hpke_enc),
+  b64urlToBytes(familyPosted.body.version.ciphertext),
+  hpkeAad({
+    purpose: "family",
+    contextId: familyPosted.body.id,
+    ownerId: "user-1",
+    recipientId: "user-1",
+    keyId: "recv-1",
+    version: 1,
+  }),
+)));
+check("confirmed bytes are sealed without rereading the note", Object.keys(sealedFamily.items).join() === "no"
+  && log.slice(familyLog).every((item) => item.path !== "/api/v1/answers/current"));
+const updateLog = log.length;
+await updateFamilyShare({
+  shareId: familyPosted.body.id,
+  expectedVersion: 1,
+  recipientUserId: "user-1",
+  recipientKeyId: "recv-1",
+  selection: { scope: "all" },
+  payload: confirmedPayload,
+});
+check("confirmed update does not reread the note", log.slice(updateLog).every((item) => item.path !== "/api/v1/answers/current"));
 
 if (failures.length) {
   console.error(failures.join("\n"));

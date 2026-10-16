@@ -421,11 +421,24 @@ export async function loadAnswerDocument() {
   return { revision: current.revision, document: JSON.parse(new TextDecoder().decode(opened)) };
 }
 
-export async function createFamilyShare({ connectionId, recipientKeyId, recipientUserId, selection, expiresAt = null }) {
-  if (!vault.storageKey || !vault.userId) throw new Error("先にパスキーで鍵を解除してください。");
+async function sharePlaintext(selection, payload) {
+  if (payload !== null && payload !== undefined) {
+    if (!payload || payload.schema !== 1 || !payload.items || typeof payload.items !== "object" || Array.isArray(payload.items)) {
+      throw new Error("確認した共有内容がありません。");
+    }
+    if (Object.keys(payload.items).length === 0) throw new Error("共有する項目がありません。");
+    return { schema: 1, items: payload.items };
+  }
   const catalog = await api("/api/v1/answers/questions");
   const loaded = await loadAnswerDocument();
-  const payload = plaintextForSelection(loaded.document, catalog, selection);
+  return plaintextForSelection(loaded.document, catalog, selection);
+}
+
+export async function createFamilyShare({
+  connectionId, recipientKeyId, recipientUserId, selection, payload = null, expiresAt = null,
+}) {
+  if (!vault.storageKey || !vault.userId) throw new Error("先にパスキーで鍵を解除してください。");
+  const plaintext = await sharePlaintext(selection, payload);
   const shareId = randomUuid();
   const keys = await api(`/api/v1/encryption-keys/${recipientUserId}`);
   const active = keys.keys.find((item) => item.id === recipientKeyId && item.status === "active");
@@ -442,13 +455,13 @@ export async function createFamilyShare({ connectionId, recipientKeyId, recipien
     keyId: recipientKeyId,
     version: 1,
   });
-  const sealed = await hpkeSeal(b64urlToBytes(active.public_key), new TextEncoder().encode(JSON.stringify(payload)), aad);
+  const sealed = await hpkeSeal(b64urlToBytes(active.public_key), new TextEncoder().encode(JSON.stringify(plaintext)), aad);
   const owner = await encryptOwnerCopy({
     storageKey: vault.storageKey,
     dataKeyId: vault.dataKeyId,
     shareId,
     version: 1,
-    plaintext: new TextEncoder().encode(JSON.stringify(payload)),
+    plaintext: new TextEncoder().encode(JSON.stringify(plaintext)),
   });
   return api("/api/v1/family/shares", {
     method: "POST",
@@ -469,14 +482,14 @@ export async function createFamilyShare({ connectionId, recipientKeyId, recipien
   });
 }
 
-export async function updateFamilyShare({ shareId, expectedVersion, recipientKeyId, recipientUserId, selection }) {
+export async function updateFamilyShare({
+  shareId, expectedVersion, recipientKeyId, recipientUserId, selection, payload = null,
+}) {
   if (!vault.storageKey || !vault.userId) throw new Error("先にパスキーで鍵を解除してください。");
   if (!Number.isInteger(expectedVersion) || expectedVersion < 1) {
     throw new Error("更新する共有の版が指定されていません。");
   }
-  const catalog = await api("/api/v1/answers/questions");
-  const loaded = await loadAnswerDocument();
-  const payload = plaintextForSelection(loaded.document, catalog, selection);
+  const plaintext = await sharePlaintext(selection, payload);
   const keys = await api(`/api/v1/encryption-keys/${recipientUserId}`);
   const active = keys.keys.find((item) => item.id === recipientKeyId && item.status === "active");
   if (!active) {
@@ -493,13 +506,13 @@ export async function updateFamilyShare({ shareId, expectedVersion, recipientKey
     keyId: recipientKeyId,
     version,
   });
-  const sealed = await hpkeSeal(b64urlToBytes(active.public_key), new TextEncoder().encode(JSON.stringify(payload)), aad);
+  const sealed = await hpkeSeal(b64urlToBytes(active.public_key), new TextEncoder().encode(JSON.stringify(plaintext)), aad);
   const owner = await encryptOwnerCopy({
     storageKey: vault.storageKey,
     dataKeyId: vault.dataKeyId,
     shareId,
     version,
-    plaintext: new TextEncoder().encode(JSON.stringify(payload)),
+    plaintext: new TextEncoder().encode(JSON.stringify(plaintext)),
   });
   return api(`/api/v1/family/shares/${shareId}/update`, {
     method: "POST",
@@ -541,6 +554,7 @@ export async function openReceivedShare(share) {
 }
 
 export async function openOwnerCopy(share) {
+  if (!vault.storageKey) throw new Error("先にパスキーで鍵を解除してください。");
   const opened = await decryptOwnerCopy({
     storageKey: vault.storageKey,
     dataKeyId: share.owner_copy.data_key_id,
