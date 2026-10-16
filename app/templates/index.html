@@ -23,7 +23,15 @@
       </li>
       <li>
         <h3><a href="{{ url_for('auth.index') }}">認証</a></h3>
-        <p>パスキー。<span class="badge">未実装</span></p>
+        <p>パスキーの登録、ログイン、鍵の解除。</p>
+      </li>
+      <li>
+        <h3><a href="{{ url_for('protection_pages.family') }}">家族共有</a></h3>
+        <p>招待、接続、選択した項目だけの共有。</p>
+      </li>
+      <li>
+        <h3><a href="{{ url_for('protection_pages.transfer') }}">端末移行</a></h3>
+        <p>照合コードと新しいパスキーの確認後に、古いパスキーを無効化します。</p>
       </li>
     </ul>
   </section>

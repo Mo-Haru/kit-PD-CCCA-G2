@@ -1,13 +1,30 @@
 {% extends "base.html" %}
-{% block title %}認証 | 意思の記録{% endblock %}
+{% block title %}パスキー認証 | 意思の記録{% endblock %}
+{% block extra_head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/morishita.css') }}">
+{% endblock %}
 {% block content %}
-  <h1>認証</h1>
-  <p><span class="badge">未実装</span></p>
-  <p>パスキーによる認証は未実装です。ログインした状態にはなりません。</p>
-  <fieldset disabled>
-    <legend>パスキー（未実装）</legend>
-    <button type="button">パスキーでログイン（未実装）</button>
-  </fieldset>
-  <p class="note">この操作は実行できません。</p>
-  <p class="note">編集場所: <code>app/blueprints/auth.py</code> と <code>app/templates/auth/</code></p>
+  <div class="sensitive">
+    <h1>パスキー認証</h1>
+    <ul class="warning">
+      <li>パスキーをすべて失うと、保存した回答は復号できません。復旧用の秘密はサーバーに預かりません。</li>
+      <li>同期パスキーは、同じアカウントの他の端末でも使えることがあります。その端末からも解除できる場合があります。</li>
+      <li>PRFに対応していないブラウザでは登録を完了できません。非対応のまま登録したことにはしません。</li>
+      <li>パスキーを無効化しても、同期先に残ったコピーや相手が保存した共有までは消せません。</li>
+    </ul>
+    <p id="session">状態を確認しています。</p>
+    <p id="status" role="status" aria-live="polite"></p>
+    <label for="display-name">表示名</label>
+    <input id="display-name" name="display-name" autocomplete="nickname" maxlength="100" required>
+    <button id="register" type="button">パスキーを登録</button>
+    <button id="login" type="button">パスキーでログイン</button>
+    <button id="unlock" type="button">鍵を解除</button>
+    <button id="logout" type="button">ログアウト</button>
+    <h2>登録済みのパスキー</h2>
+    <label><input id="confirm-last" type="checkbox"> 最後のパスキーを無効化すると、過去のデータを復号できなくなることを確認しました</label>
+    <ul id="passkeys"></ul>
+    <button id="add-passkey" type="button">パスキーを追加</button>
+    <p><a href="{{ url_for('protection_pages.family') }}">家族共有</a> / <a href="{{ url_for('protection_pages.transfer') }}">端末移行</a></p>
+  </div>
+  <script type="module" src="{{ url_for('static', filename='js/watashi/account.mjs') }}"></script>
 {% endblock %}

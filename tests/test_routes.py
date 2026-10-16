@@ -1,4 +1,4 @@
-FEATURE_PAGES = ("/answers", "/sharing", "/auth")
+FEATURE_PAGES = ("/answers", "/sharing")
 FORBIDDEN_PHRASES = ("ログインしました", "保存しました", "暗号化しました", "共有しました")
 
 
@@ -44,7 +44,6 @@ def test_feature_pages_name_their_files(client):
     expectations = {
         "/answers": "app/blueprints/answers.py",
         "/sharing": "app/blueprints/sharing.py",
-        "/auth": "app/blueprints/auth.py",
     }
     for path, needle in expectations.items():
         body = client.get(path).get_data(as_text=True)
@@ -52,7 +51,7 @@ def test_feature_pages_name_their_files(client):
 
 
 def test_unimplemented_actions_reject_post(client):
-    for path in FEATURE_PAGES:
+    for path in (*FEATURE_PAGES, "/auth"):
         response = client.post(path)
         assert response.status_code == 405
 

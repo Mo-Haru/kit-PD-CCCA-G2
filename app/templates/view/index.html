@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}QRの閲覧 | 意思の記録{% endblock %}
+{% block extra_head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/morishita.css') }}">
+{% endblock %}
+{% block content %}
+  <div class="sensitive" id="viewer" data-share-id="{{ share_id }}">
+    <h1>共有の閲覧</h1>
+    <p>復号はこの端末の中で行います。内容を開くまで閲覧は開始しません。再読み込みでは、閲覧の絶対期限は延長されません。</p>
+    <p id="status" role="status" aria-live="polite">準備しています。</p>
+    <p id="validity"></p>
+    <p id="updated"></p>
+    <button id="open" type="button">内容を開く</button>
+    <button id="reopen" type="button">期限が切れたので、新しく開き直す</button>
+    <div id="output"></div>
+    <button id="end" type="button">閲覧を終了</button>
+  </div>
+  <script type="module" src="{{ url_for('static', filename='js/watashi/view.mjs') }}"></script>
+{% endblock %}

@@ -1,10 +1,10 @@
-"""人生会議アプリの永続化層（19モデル）。Python 3.10+。
+"""人生会議アプリの永続化層。Python 3.10+。
 
 依存: Flask-SQLAlchemy>=3.1,<3.2 / SQLAlchemy>=2.0,<2.1
 共通のdbはapp.extensionsで生成し、create_appで初期化する。
-モデルのimportでメタデータへ登録され、flask --app run init-dbで新規テーブルを
-作成する。既存DBの変更にはFlask-Migrate/Alembicを使う。
-このパッケージは永続化層のみ。WebAuthn検証、暗号化、認可、APIは含まない。
+モデルのimportでメタデータへ登録され、flask --app run init-dbで未作成テーブルを
+追加する。既存テーブルの列変更はapp/schema_upgrade.pyの手順で行う。
+このパッケージは永続化層である。WebAuthn検証、暗号化、認可、APIはblueprintsとservicesに置く。
 
 実装時の契約:
 * パスキーの秘密鍵、PRF出力、平文の回答・復号鍵はサーバーへ送らない。
@@ -60,6 +60,23 @@ from app.models.question import (
 )
 from app.models.audit import AuditLog
 from app.models.notification import ExternalAccount, NotificationDelivery, NotificationSetting
+from app.models.protection import (
+    DeviceMigration,
+    FamilyConnection,
+    FamilyInvitation,
+    FamilyShare,
+    FamilyShareOwnerCopy,
+    FamilyShareVersion,
+    QrShare,
+    QrShareVersion,
+    QrViewSession,
+    RateLimitBucket,
+    SchemaMigration,
+    SessionReauth,
+    UserEncryptionKey,
+    UserKeyBundle,
+    VerifiedContact,
+)
 
 __all__ = [
     "db", "utcnow", "User", "PasskeyCredential", "WebAuthnChallenge",
@@ -67,4 +84,8 @@ __all__ = [
     "SharedSnapshot", "QuestionCategory", "Question", "QuestionOption",
     "GlossaryTerm", "QuestionGlossaryTerm", "AuditLog", "RecoveryKeyEnvelope",
     "ExternalAccount", "NotificationSetting", "NotificationDelivery", "ShareRecipient",
+    "SchemaMigration", "UserEncryptionKey", "UserKeyBundle", "SessionReauth",
+    "RateLimitBucket", "VerifiedContact", "FamilyInvitation", "FamilyConnection",
+    "FamilyShare", "FamilyShareVersion", "FamilyShareOwnerCopy", "QrShare",
+    "QrShareVersion", "QrViewSession", "DeviceMigration",
 ]

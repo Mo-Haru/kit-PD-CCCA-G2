@@ -1,0 +1,64 @@
+.sensitive button,
+.sensitive input,
+.sensitive select {
+  min-height: 48px;
+  font-size: 1.05rem;
+}
+
+.sensitive button {
+  padding: 0.7rem 1rem;
+}
+
+.sensitive input:not([type="checkbox"]):not([type="radio"]),
+.sensitive select {
+  display: block;
+  width: 100%;
+  margin: 0.35rem 0 0.8rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.sensitive input[type="checkbox"],
+.sensitive input[type="radio"] {
+  width: 1.15rem;
+  height: 1.15rem;
+  min-height: 1.15rem;
+  margin: 0 0.45rem 0.15rem 0;
+  vertical-align: -0.15rem;
+  accent-color: #1f6b4a;
+}
+
+.sensitive label {
+  display: block;
+  margin: 0.7rem 0;
+}
+
+.warning {
+  background: #fff6e8;
+  border: 1px solid #ead7b8;
+  border-radius: 8px;
+  padding: 0.8rem 1rem;
+}
+
+.warning li + li {
+  margin-top: 0.35rem;
+}
+
+#status {
+  min-height: 1.5em;
+}
+
+.secret-link {
+  overflow-wrap: anywhere;
+  font-family: Consolas, "Cascadia Mono", monospace;
+}
+
+@media (max-width: 640px) {
+  .sensitive button {
+    display: block;
+    width: 100%;
+    margin: 0.4rem 0;
+  }
+}
