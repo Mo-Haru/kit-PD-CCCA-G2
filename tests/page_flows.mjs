@@ -492,18 +492,41 @@ check("failed proof disables the new passkey", proofFailed && disabled.some((pat
 const afterFailure = await loadAnswerDocument();
 check("failed proof leaves the current key usable", afterFailure.document.items.no.state === "declined");
 
-const { confirmationStillMatches } = await import("../app/static/js/watashi/family.mjs");
+const { confirmationCoversShare, confirmationStillMatches } = await import("../app/static/js/watashi/family.mjs");
 const previewSelection = { scope: "questions", ids: ["keep"] };
 const previewPayload = plaintextForSelection(stored, catalog, previewSelection);
-const previewKey = shareFingerprint(previewSelection, previewPayload);
-check("the previewed selection still matches", confirmationStillMatches(previewKey, previewSelection, previewPayload));
-check("a later selection is not already confirmed", !confirmationStillMatches(previewKey, { scope: "questions", ids: ["no"] }, previewPayload));
+const confirmedContext = {
+  connectionId: "conn-1",
+  recipientUserId: "user-2",
+  recipientKeyId: "key-1",
+  expiresAt: null,
+};
+const previewKey = shareFingerprint(previewSelection, previewPayload, confirmedContext);
+check("the previewed selection still matches", confirmationStillMatches(previewKey, previewSelection, previewPayload, confirmedContext));
+check("a later selection is not already confirmed", !confirmationStillMatches(
+  previewKey, { scope: "questions", ids: ["no"] }, previewPayload, confirmedContext,
+));
 check("changed answers are not already confirmed", !confirmationStillMatches(
   previewKey,
   previewSelection,
   plaintextForSelection({ schema: 1, items: { keep: { state: "answered", value: "別の値" } } }, catalog, previewSelection),
+  confirmedContext,
 ));
-check("an empty confirmation matches nothing", !confirmationStillMatches("", previewSelection, previewPayload));
+check("a later recipient is not already confirmed", !confirmationStillMatches(
+  previewKey, previewSelection, previewPayload, { ...confirmedContext, recipientUserId: "user-9" },
+));
+check("a later expiry is not already confirmed", !confirmationStillMatches(
+  previewKey, previewSelection, previewPayload, { ...confirmedContext, expiresAt: "2026-10-20T00:00:00Z" },
+));
+check("a later key is not already confirmed", !confirmationStillMatches(
+  previewKey, previewSelection, previewPayload, { ...confirmedContext, recipientKeyId: "key-2" },
+));
+check("an empty confirmation matches nothing", !confirmationStillMatches("", previewSelection, previewPayload, confirmedContext));
+check("update stays on the confirmed recipient", confirmationCoversShare(confirmedContext, {
+  recipient_user_id: "user-2", recipient_key_id: "key-1",
+}) && !confirmationCoversShare(confirmedContext, {
+  recipient_user_id: "user-9", recipient_key_id: "key-1",
+}));
 
 const confirmedPayload = plaintextForSelection(stored, catalog, { scope: "questions", ids: ["no"] });
 const familyLog = log.length;

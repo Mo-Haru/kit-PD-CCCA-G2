@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from pyhpke import AEADId, CipherSuite, KDFId, KEMId
 from sqlalchemy import inspect, text
+from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
 from app.models import (
@@ -28,7 +29,7 @@ from app.models import (
     WebAuthnChallenge,
     utcnow,
 )
-from app.schema_upgrade import apply_schema_upgrades
+from app.schema_upgrade import apply_schema_upgrades, set_sqlite_foreign_keys
 from app.services.support import b64decode, b64encode
 from config import TestingConfig
 from tests.soft_passkey import SoftPasskey
@@ -994,6 +995,21 @@ def test_added_passkey_proof_requires_reauth_and_old_passkey_remains(client, app
         "envelope": envelope(options.get_json()["prf_input"]),
     })
     assert verified.status_code == 200, verified.get_json()
+    blocked, _credential = login(app.test_client(), added)
+    assert blocked.status_code == 403
+    assert blocked.get_json()["error"] == "passkey_unproven"
+    still_old, _credential = login(app.test_client(), original)
+    assert still_old.status_code == 200
+    listed = client.get("/api/v1/auth/passkeys").get_json()["passkeys"]
+    usable = [row for row in listed if row["revoked_at"] is None and row["proven_at"]]
+    pending = [row for row in listed if row["revoked_at"] is None and not row["proven_at"]]
+    assert len(usable) == 1
+    assert len(pending) == 1
+    assert pending[0]["id"] == verified.get_json()["passkey_id"]
+    original_id = client.get("/api/v1/auth/session").get_json()["passkey_id"]
+    last = post(client, f"/api/v1/auth/passkeys/{original_id}/disable", {})
+    assert last.status_code == 409
+    assert last.get_json()["error"] == "last_passkey"
     proof = post(client, f"/api/v1/auth/passkeys/{verified.get_json()['passkey_id']}/proof/options", {})
     assert proof.status_code == 200, proof.get_json()
     assert "wrapped_key" in proof.get_json()["envelope"]
@@ -1001,6 +1017,8 @@ def test_added_passkey_proof_requires_reauth_and_old_passkey_remains(client, app
         "credential": added.authenticate(proof.get_json()["public_key"], ORIGIN),
     })
     assert proved.status_code == 200, proved.get_json()
+    opened, _credential = login(app.test_client(), added)
+    assert opened.status_code == 200, opened.get_json()
     again, _credential = login(app.test_client(), original)
     assert again.status_code == 200
     family = client.get("/family")
@@ -1038,7 +1056,9 @@ def test_prove_passkey_upgrade_keeps_existing_challenges(app):
             "DELETE FROM schema_migrations WHERE version = '20261015_prove_passkey_purpose'"
         ))
         db.session.commit()
+        driver = db.session.connection().connection.driver_connection
         apply_schema_upgrades()
+        assert db.session.connection().connection.driver_connection is driver
         purpose = db.session.execute(text(
             "SELECT purpose FROM webauthn_challenges "
             "WHERE id = '11111111-1111-1111-1111-111111111111'"
@@ -1048,6 +1068,72 @@ def test_prove_passkey_upgrade_keeps_existing_challenges(app):
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'webauthn_challenges'"
         )).scalar()
         assert "prove_passkey" in definition
+        cursor = driver.cursor()
+        cursor.execute("PRAGMA foreign_keys")
+        assert cursor.fetchone()[0] == 1
+        cursor.close()
+        with pytest.raises(IntegrityError):
+            db.session.execute(text(
+                "INSERT INTO webauthn_challenges ("
+                "challenge, purpose, user_id, flow_binding_hash, request_options, "
+                "expires_at, consumed_at, id, created_at"
+                ") VALUES (:challenge, 'login', 'missing-user', :flow, '{}', "
+                "'2026-10-16 00:00:00', NULL, '22222222-2222-2222-2222-222222222222', "
+                "'2026-10-15 00:00:00')"
+            ), {"challenge": b"c" * 32, "flow": b"d" * 32})
+            db.session.commit()
+        db.session.rollback()
+
+
+def test_foreign_keys_restore_outside_an_open_transaction(app):
+    with app.app_context():
+        db.create_all()
+        connection = db.session.connection()
+        driver = connection.connection.driver_connection
+        assert set_sqlite_foreign_keys(connection, False) == 0
+        db.session.execute(text("CREATE TABLE fk_probe (id INTEGER PRIMARY KEY)"))
+        db.session.execute(text("INSERT INTO fk_probe (id) VALUES (1)"))
+        assert driver.in_transaction
+        db.session.execute(text("PRAGMA foreign_keys=ON"))
+        cursor = driver.cursor()
+        cursor.execute("PRAGMA foreign_keys")
+        assert cursor.fetchone()[0] == 0
+        cursor.close()
+        assert set_sqlite_foreign_keys(connection, True) == 1
+        cursor = driver.cursor()
+        cursor.execute("PRAGMA foreign_keys")
+        assert cursor.fetchone()[0] == 1
+        cursor.close()
+        assert not driver.in_transaction
+        assert db.session.connection().connection.driver_connection is driver
+
+
+def test_proven_at_upgrade_keeps_existing_passkeys_usable(app):
+    with app.app_context():
+        db.create_all()
+        apply_schema_upgrades()
+        db.session.execute(text("ALTER TABLE passkey_credentials DROP COLUMN proven_at"))
+        db.session.execute(text(
+            "DELETE FROM schema_migrations WHERE version = '20261020_passkey_proven_at'"
+        ))
+        db.session.execute(text(
+            "INSERT INTO users (id, created_at, updated_at, webauthn_user_handle, status) "
+            "VALUES ('user-proven', '2026-10-15 00:00:00', '2026-10-15 00:00:00', :handle, 'active')"
+        ), {"handle": b"h" * 32})
+        db.session.execute(text(
+            "INSERT INTO passkey_credentials ("
+            "id, created_at, user_id, credential_id, public_key, sign_count, transports, "
+            "backup_eligible, backup_state, uv_initialized, prf_enabled"
+            ") VALUES ("
+            "'pk-proven', '2026-10-15 00:00:00', 'user-proven', :cred, :pub, 0, '[]', 0, 0, 0, 1)"
+        ), {"cred": b"c" * 16, "pub": b"p" * 16})
+        db.session.commit()
+        apply_schema_upgrades()
+        proven = db.session.execute(text(
+            "SELECT proven_at FROM passkey_credentials WHERE id = 'pk-proven'"
+        )).scalar()
+        assert proven is not None
+        assert str(proven).startswith("2026-10-15")
 
 
 def test_decrypt_confirmed_column_upgrade_keeps_the_table(app):

@@ -42,6 +42,7 @@ from app.models import (
 )
 from app.services.support import (
     ActionResult,
+    ApiError,
     audit,
     b64decode,
     b64encode,
@@ -238,7 +239,7 @@ def _transports(credential: dict) -> list[str]:
     return [item for item in raw if isinstance(item, str) and item in ALLOWED_TRANSPORTS][:8]
 
 
-def _save_passkey(user: User, verified, label: str | None, transports: list[str]) -> PasskeyCredential:
+def _save_passkey(user: User, verified, label: str | None, transports: list[str], *, proven: bool = True) -> PasskeyCredential:
     backed = bool(verified.credential_backed_up)
     device_type = getattr(verified, "credential_device_type", CredentialDeviceType.SINGLE_DEVICE)
     eligible = backed or device_type == CredentialDeviceType.MULTI_DEVICE
@@ -256,6 +257,7 @@ def _save_passkey(user: User, verified, label: str | None, transports: list[str]
         aaguid=aaguid,
         label=label,
         last_used_at=utcnow(),
+        proven_at=utcnow() if proven else None,
     )
     db.session.add(row)
     db.session.flush()
@@ -413,6 +415,14 @@ def finish_login(body: dict) -> ActionResult:
     verified = _verify_assertion(credential, challenge.challenge, passkey.public_key, passkey.sign_count)
     if not _same_bytes(verified.credential_id, passkey.credential_id):
         fail("webauthn_invalid", 400, "パスキーの検証に失敗しました。")
+    if passkey.proven_at is None:
+        passkey.sign_count = int(verified.new_sign_count)
+        audit("auth_login", "passkey", passkey.id, "failure", "passkey_unproven", actor_id=user.id)
+        db.session.commit()
+        raise ApiError(
+            "passkey_unproven", 403,
+            "このパスキーは確認が済んでいません。確認済みのパスキーでログインしてください。",
+        )
     # ライブラリが同期パスキーのsign count 0を受理した場合はその値を保存する。ここで0を拒否しない。
     passkey.sign_count = int(verified.new_sign_count)
     passkey.last_used_at = utcnow()
@@ -516,6 +526,7 @@ def list_passkeys() -> dict:
         "created_at": iso(row.created_at),
         "last_used_at": iso(row.last_used_at),
         "revoked_at": iso(row.revoked_at),
+        "proven_at": iso(row.proven_at),
         "backup_eligible": row.backup_eligible,
         "backup_state": row.backup_state,
         "prf_enabled": row.prf_enabled,
@@ -543,6 +554,15 @@ def _current_data_key(user_id: str) -> UserDataKey:
     if row is None:
         fail("key_unavailable", 409, "保管用の鍵が見つかりません。")
     return row
+
+
+def _usable_passkeys(user_id: str):
+    """確認済みで無効化されていないパスキー。確認待ちは件数に入れない。"""
+    return db.session.query(PasskeyCredential).filter(
+        PasskeyCredential.user_id == user_id,
+        PasskeyCredential.revoked_at.is_(None),
+        PasskeyCredential.proven_at.is_not(None),
+    )
 
 
 def begin_add_passkey() -> ActionResult:
@@ -573,7 +593,7 @@ def finish_add_passkey(body: dict) -> ActionResult:
     if data_key is None or data_key.user_id != user.id or data_key.retired_at is not None:
         fail("key_unavailable", 409, "保管用の鍵が見つかりません。", actor_id=user.id)
     wrapped = _envelope(body, challenge.request_options["prf_input"])
-    passkey = _save_passkey(user, verified, _label(body), _transports(credential))
+    passkey = _save_passkey(user, verified, _label(body), _transports(credential), proven=False)
     db.session.add(UserKeyEnvelope(
         user_id=user.id, data_key_id=data_key.id, passkey_id=passkey.id,
         kdf_version=1, crypto_version=CRYPTO_VERSION, **wrapped,
@@ -617,6 +637,7 @@ def finish_passkey_proof(passkey_id: str, body: dict) -> dict:
         fail("webauthn_invalid", 400, "パスキーの検証に失敗しました。", actor_id=user.id)
     passkey.sign_count = int(verified.new_sign_count)
     passkey.last_used_at = utcnow()
+    passkey.proven_at = utcnow()
     audit("passkey_proved", "passkey", passkey.id, "success", actor_id=user.id)
     db.session.commit()
     return {"ok": True, "passkey_id": passkey.id}
@@ -629,8 +650,8 @@ def disable_passkey(passkey_id: str, body: dict) -> ActionResult:
     passkey = db.session.get(PasskeyCredential, passkey_id)
     if passkey is None or passkey.user_id != user.id or passkey.revoked_at is not None:
         fail("not_found", 404, "パスキーが見つかりません。", actor_id=user.id)
-    active = db.session.query(PasskeyCredential).filter_by(user_id=user.id, revoked_at=None).count()
-    if active <= 1 and body.get("confirm_last") is not True:
+    usable = _usable_passkeys(user.id).count()
+    if passkey.proven_at is not None and usable <= 1 and body.get("confirm_last") is not True:
         fail("last_passkey", 409, "最後のパスキーです。無効化すると過去のデータを復号できません。確認が必要です。",
              action="passkey_disable", target_type="passkey", target_id=passkey.id, actor_id=user.id)
     now = utcnow()

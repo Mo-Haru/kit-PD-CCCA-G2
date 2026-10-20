@@ -35,8 +35,16 @@ function currentSelection() {
   return { scope: "questions", ids: checked("#questions") };
 }
 
-export function confirmationStillMatches(rememberedKey, selection, payload) {
-  return typeof rememberedKey === "string" && rememberedKey !== "" && rememberedKey === shareFingerprint(selection, payload);
+export function confirmationStillMatches(rememberedKey, selection, payload, context) {
+  return typeof rememberedKey === "string"
+    && rememberedKey !== ""
+    && rememberedKey === shareFingerprint(selection, payload, context);
+}
+
+export function confirmationCoversShare(context, share) {
+  return Boolean(context)
+    && context.recipientUserId === share.recipient_user_id
+    && context.recipientKeyId === share.recipient_key_id;
 }
 
 async function syncAccess() {
@@ -98,15 +106,50 @@ function clearConfirmation() {
   document.querySelector("#preview-output").replaceChildren();
 }
 
+async function currentConfirmation() {
+  const selected = document.querySelector("#connection").value;
+  if (!selected) throw new Error("接続を選んでください。");
+  const connection = JSON.parse(selected);
+  const keys = await api(`/api/v1/encryption-keys/${connection.userId}`);
+  const active = (keys.keys || []).find((item) => item.status === "active");
+  if (!active) throw new Error("相手の受信用公開鍵がありません。");
+  const select = document.querySelector("#connection");
+  const recipientName = select.selectedOptions && select.selectedOptions[0]
+    ? select.selectedOptions[0].textContent
+    : connection.userId;
+  return {
+    connectionId: connection.id,
+    recipientUserId: connection.userId,
+    recipientKeyId: active.id,
+    expiresAt: toIso(document.querySelector("#expires-at").value),
+    recipientName,
+  };
+}
+
+function showConfirmedFacts(context) {
+  const output = document.querySelector("#preview-output");
+  const lines = [
+    `相手：${context.recipientName}`,
+    `鍵：${context.recipientKeyId}`,
+    `期限：${context.expiresAt || "なし"}`,
+  ];
+  for (const line of lines) {
+    const row = document.createElement("p");
+    row.textContent = line;
+    output.append(row);
+  }
+}
+
 async function requireConfirmedPayload() {
   const payload = await loadSharePayload();
-  if (!confirmationStillMatches(previewKey, currentSelection(), payload)) {
+  const context = await currentConfirmation();
+  if (!confirmationStillMatches(previewKey, currentSelection(), payload, context)) {
     clearConfirmation();
-    const error = new Error("確認内容が変わったので、もう一度確認してください。");
+    const error = new Error("確認内容が変わったので、もう一度確認してください。相手、期限、鍵、項目を確認し直してください。");
     error.code = "confirmation_stale";
     throw error;
   }
-  return payload;
+  return { payload, context };
 }
 
 function toIso(value) {
@@ -193,17 +236,22 @@ async function refresh() {
         return;
       }
       try {
-        const payload = await requireConfirmedPayload();
+        const confirmed = await requireConfirmedPayload();
+        if (!confirmationCoversShare(confirmed.context, share)) {
+          clearConfirmation();
+          show("確認した相手と鍵がこの共有と違います。もう一度確認してください。");
+          return;
+        }
         await updateFamilyShare({
           shareId: share.id,
           expectedVersion: share.current_version,
           recipientUserId: share.recipient_user_id,
           recipientKeyId: share.recipient_key_id,
           selection: currentSelection(),
-          payload,
+          payload: confirmed.payload,
         });
         clearConfirmation();
-        show("確認した項目だけを更新しました。回答を保存しただけでは、この版は変わりません。");
+        show("確認した相手と鍵の共有を、確認した項目だけに更新しました。回答を保存しただけでは、この版は変わりません。");
         await refresh();
       } catch (error) {
         show(error.message);
@@ -331,9 +379,11 @@ if (document.querySelector("#share")) {
   document.querySelector("#show-preview").addEventListener("click", async () => {
     try {
       const payload = await loadSharePayload();
+      const context = await currentConfirmation();
       fillAnswerList(document.querySelector("#preview-output"), entriesFromPayload(payload, catalog));
-      previewKey = shareFingerprint(currentSelection(), payload);
-      show("確認した内容だけが共有されます。選択や回答が変わった場合は、もう一度確認してください。");
+      showConfirmedFacts(context);
+      previewKey = shareFingerprint(currentSelection(), payload, context);
+      show("確認した相手、期限、鍵、項目だけが共有されます。どれかを変えた場合は、もう一度確認してください。");
     } catch (error) {
       show(error.message);
     }
@@ -344,30 +394,18 @@ if (document.querySelector("#share")) {
       show("共有する項目を確認してからチェックしてください。");
       return;
     }
-    const selected = document.querySelector("#connection").value;
-    if (!selected) {
-      show("接続を選んでください。");
-      return;
-    }
     try {
-      const payload = await requireConfirmedPayload();
-      const connection = JSON.parse(selected);
-      const keys = await api(`/api/v1/encryption-keys/${connection.userId}`);
-      const active = keys.keys.find((item) => item.status === "active");
-      if (!active) {
-        show("相手の受信用公開鍵がありません。");
-        return;
-      }
+      const confirmed = await requireConfirmedPayload();
       await createFamilyShare({
-        connectionId: connection.id,
-        recipientUserId: connection.userId,
-        recipientKeyId: active.id,
+        connectionId: confirmed.context.connectionId,
+        recipientUserId: confirmed.context.recipientUserId,
+        recipientKeyId: confirmed.context.recipientKeyId,
         selection: currentSelection(),
-        payload,
-        expiresAt: toIso(document.querySelector("#expires-at").value),
+        payload: confirmed.payload,
+        expiresAt: confirmed.context.expiresAt,
       });
       clearConfirmation();
-      show("確認した項目だけを共有しました。回答を後から保存しても、この共有は自動では変わりません。");
+      show("確認した相手、期限、鍵、項目だけを共有しました。回答を後から保存しても、この共有は自動では変わりません。");
       await refresh();
     } catch (error) {
       show(error.message);

@@ -22,16 +22,16 @@ async function refresh() {
   for (const passkey of passkeys.passkeys) {
     const item = document.createElement("li");
     const label = passkey.label || "名称なし";
-    const state = passkey.revoked_at ? "無効" : "有効";
+    const state = passkey.revoked_at ? "無効" : passkey.proven_at ? "有効" : "確認待ち";
     item.textContent = `${label} / ${state} / 作成 ${passkey.created_at || ""}`;
     if (!passkey.revoked_at) {
       const button = document.createElement("button");
       button.type = "button";
       button.textContent = "このパスキーを無効化";
       button.addEventListener("click", async () => {
-        const active = passkeys.passkeys.filter((row) => !row.revoked_at);
+        const active = passkeys.passkeys.filter((row) => !row.revoked_at && row.proven_at);
         const body = {};
-        if (active.length <= 1) {
+        if (passkey.proven_at && active.length <= 1) {
           if (!document.querySelector("#confirm-last").checked) {
             show("最後のパスキーを無効化するには、データを復号できなくなる確認にチェックしてください。");
             return;

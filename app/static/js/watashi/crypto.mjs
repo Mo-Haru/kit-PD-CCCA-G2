@@ -205,11 +205,18 @@ export function plaintextForSelection(document, catalog, selection) {
   return selectedShareItems(source, ids);
 }
 
-export function shareFingerprint(selection, payload) {
+export function shareFingerprint(selection, payload, context = {}) {
   const items = payload && payload.items && typeof payload.items === "object" && !Array.isArray(payload.items)
     ? payload.items
     : {};
-  return JSON.stringify({ selection, items });
+  return JSON.stringify({
+    selection,
+    items,
+    connectionId: context.connectionId || "",
+    recipientUserId: context.recipientUserId || "",
+    recipientKeyId: context.recipientKeyId || "",
+    expiresAt: context.expiresAt ?? null,
+  });
 }
 
 function valueText(value) {

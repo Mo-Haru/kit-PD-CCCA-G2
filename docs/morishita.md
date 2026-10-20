@@ -71,8 +71,8 @@ HKDFのsaltは、パスキーの包みでは封筒の `kdf_salt`、それ以外�
 3. `POST /api/v1/auth/register/verify` に `credential`、`envelope`、`encryption_public_key`、`key_bundle`。封筒は `prf_input`、`kdf_salt`、`wrapped_key`（48バイト）、`nonce`、`kdf_version: 1`、`crypto_version: 1` です。
 4. ログインは `POST /api/v1/auth/login/options` と `login/verify` です。ログインだけでは保管用鍵は解けません。
 5. `POST /api/v1/auth/unlock/options` と `unlock/verify` で、同じパスキーのPRFから解きます。共有や移行の開始には、この再認証が15分必要です。
-6. `POST /api/v1/auth/passkeys/options` と `passkeys/verify` でパスキーを追加します。その後、同じパスキーで `POST /api/v1/auth/passkeys/<id>/proof/options` と `proof/verify` を行い、今の保管用鍵を再び開けることを確認します。確認前は追加済みとして扱いません。確認に失敗した追加は無効化します。古いパスキーは残ります。
-7. `POST /api/v1/auth/passkeys/<id>/disable` です。最後の1件は `{ "confirm_last": true }` が無いと409 `last_passkey` です。無効化しても、同期パスキーのコピーや相手が保存した共有は消えません。
+6. `POST /api/v1/auth/passkeys/options` と `passkeys/verify` でパスキーを追加します。その後、同じパスキーで `POST /api/v1/auth/passkeys/<id>/proof/options` と `proof/verify` を行い、今の保管用鍵を再び開けることを確認します。`proof/verify` が成功するまで `proven_at` は空です。そのパスキーでの通常ログインは403 `passkey_unproven` で、セッションは発行しません。有効なパスキーの件数にも入れないので、確認待ちが残っていても、確認済みが1件なら無効化は409 `last_passkey` です。確認に失敗した追加は無効化します。古いパスキーは残ります。初回登録と移行先の登録は、その手続きの中で保管用鍵を包むので確認済みです。
+7. `POST /api/v1/auth/passkeys/<id>/disable` です。確認済みの最後の1件は `{ "confirm_last": true }` が無いと409 `last_passkey` です。確認待ちのパスキーは、この件数に入りません。無効化しても、同期パスキーのコピーや相手が保存した共有は消えません。
 8. `GET /api/v1/auth/session` は未ログインでも200で `{ "authenticated": false }` です。
 
 署名カウンターが0の同期パスキーは、0のままもう一度成功します。0だからといって拒否しません。カウンターが増える認証器では、増えていない応答を拒否します。
@@ -120,7 +120,7 @@ try {
 
 受信者は `GET /api/v1/family/received` と `GET /api/v1/family/received/<id>` で現在の版だけを受け取ります。期限切れ、停止、切断のあとは404です。`/family` では、復号した質問名と回答値を表示します。`answered` は値、`undecided` は「未定」、`declined` は「回答しない」、`unanswered` は「未回答」です。描画は `textContent` で行い、回答中のHTMLはスクリプトとして実行しません。
 
-作成と更新のどちらも、先に「共有する内容を確認」で出した項目と、確定時の選択・回答が一致しているときだけ暗号化します。一致しないときはチェックを外し、表示を消して、もう一度確認するまで保存しません。確認済みの `payload` を `createFamilyShare` と `updateFamilyShare` に渡すと、そのバイト列をそのまま暗号文にします。渡したあとに回答を読み直して別の内容へ付け替えません。`payload` を省いた呼び出しは、その時点の `selection` だけを暗号化し、未指定を全体共有にはしません。
+作成と更新のどちらも、先に「共有する内容を確認」で出した項目、相手、接続、受信用鍵ID、期限と、確定時のそれらが一致しているときだけ暗号化します。相手や期限や鍵を変えた場合も、チェックを外し、表示を消して、もう一度確認するまで保存しません。更新は、確認した相手と鍵IDがその共有のものと一致するときだけ行います。確認済みの `payload` を `createFamilyShare` と `updateFamilyShare` に渡すと、そのバイト列をそのまま暗号文にします。渡したあとに回答を読み直して別の内容へ付け替えません。`payload` を省いた呼び出しは、その時点の `selection` だけを暗号化し、未指定を全体共有にはしません。
 
 ## QR（坂）
 
@@ -161,6 +161,8 @@ try {
 
 ## テスト
 
-Pythonのテストは `python -m pytest` です。中で Node.js が `tests/browser_crypto.mjs` と `tests/page_flows.mjs` を実行します。前者はブラウザ暗号とPythonのHPKEが同じ暗号文を開けることを見ます。後者は、ページを開いただけではQRを開始しないこと、選択した項目だけが暗号文に入ること、確認した項目と違う選択や回答では共有を確定しないこと、確認済みのバイト列を読み直して付け替えないこと、閲覧状態と復号失敗を分けて示すこと、古いrevisionを拒否すること、解錠失敗では移行を完了しないこと、壊れた共有では確認APIを呼ばないことを見ます。
+Pythonのテストは `python -m pytest` です。中で Node.js が `tests/browser_crypto.mjs` と `tests/page_flows.mjs` を実行します。前者はブラウザ暗号とPythonのHPKEが同じ暗号文を開けることを見ます。後者は、ページを開いただけではQRを開始しないこと、選択した項目だけが暗号文に入ること、確認した項目・相手・期限・鍵と違う場合は共有を確定しないこと、確認済みのバイト列を読み直して付け替えないこと、閲覧状態と復号失敗を分けて示すこと、古いrevisionを拒否すること、解錠失敗では移行を完了しないこと、壊れた共有では確認APIを呼ばないことを見ます。
+
+SQLiteでチャレンジ表を作り直す手順は、外部キーを切るときも戻すときも、同じ接続でトランザクションの外に `PRAGMA foreign_keys` を実行します。戻したあとは `foreign_keys=1` であることを読み、違う場合は失敗させます。既存のパスキーへ `proven_at` を足す手順は、すでにある行を `created_at` で確認済みにします。
 
 模擬パスキーは `tests/soft_passkey.py` です。実機のパスキー、PRF、Android、iOS、Windowsの認証器はこの環境では未確認です。未確認だからといって、平文やPRF出力をサーバーへ送る代替処理は入れていません。
