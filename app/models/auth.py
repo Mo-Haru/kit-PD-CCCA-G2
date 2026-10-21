@@ -16,7 +16,10 @@ class WebAuthnChallenge(IdentityMixin, CreatedMixin, Model):
 
     __tablename__ = "webauthn_challenges"
     __table_args__ = (
-        CheckConstraint("purpose IN ('register', 'login', 'reauthenticate', 'add_passkey')", name="purpose"),
+        CheckConstraint(
+            "purpose IN ('register', 'login', 'reauthenticate', 'add_passkey', 'prove_passkey')",
+            name="purpose",
+        ),
         CheckConstraint("length(challenge) = 32", name="challenge_length"),
         CheckConstraint("length(flow_binding_hash) = 32", name="binding_length"),
         CheckConstraint("expires_at > created_at", name="expiry"),

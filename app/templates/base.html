@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}意思の記録{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  {% block extra_head %}{% endblock %}
 </head>
 <body>
   <a class="skip" href="#main">本文へ</a>
@@ -16,12 +17,14 @@
         <a href="{{ url_for('answers.index') }}" {% if request.endpoint == 'answers.index' %}aria-current="page"{% endif %}>回答</a>
         <a href="{{ url_for('sharing.index') }}" {% if request.endpoint == 'sharing.index' %}aria-current="page"{% endif %}>共有</a>
         <a href="{{ url_for('auth.index') }}" {% if request.endpoint == 'auth.index' %}aria-current="page"{% endif %}>認証</a>
+        <a href="{{ url_for('protection_pages.family') }}" {% if request.endpoint == 'protection_pages.family' %}aria-current="page"{% endif %}>家族</a>
+        <a href="{{ url_for('protection_pages.transfer') }}" {% if request.endpoint == 'protection_pages.transfer' %}aria-current="page"{% endif %}>移行</a>
         <a href="{{ url_for('main.health') }}">起動確認</a>
       </nav>
     </div>
   </header>
   <div class="banner">
-    <p class="wrap">これは開発用の土台です。回答の保存、認証、暗号化、共有は未実装で、操作は実行できません。</p>
+    <p class="wrap">開発用の土台です。回答の入力画面とQRコードの画像表示は未実装です。パスキー、家族共有、QRの閲覧、端末移行は使えます。</p>
   </div>
   <main id="main" class="wrap">
     {% block content %}{% endblock %}

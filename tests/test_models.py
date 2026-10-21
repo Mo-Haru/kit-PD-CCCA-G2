@@ -77,8 +77,18 @@ def test_init_db_registers_all_19_models(app):
     assert result.exit_code == 0, result.output
     with app.app_context():
         exported = [getattr(models, name) for name in models.__all__ if name not in {"db", "utcnow"}]
-        assert len(exported) == 19
-        assert set(inspect(db.engine).get_table_names()) == {model.__tablename__ for model in exported}
+        names = {model.__tablename__ for model in exported}
+        original = {
+            "users", "passkey_credentials", "webauthn_challenges", "auth_sessions",
+            "user_data_keys", "user_key_envelopes", "private_answer_documents",
+            "shared_snapshots", "share_recipients", "question_categories", "questions",
+            "question_options", "glossary_terms", "question_glossary_terms", "audit_logs",
+            "recovery_key_envelopes", "external_accounts", "notification_settings",
+            "notification_deliveries",
+        }
+        assert original <= names
+        assert len(exported) == len(names)
+        assert set(inspect(db.engine).get_table_names()) == names
         assert models.db is db
         assert db.session.execute(text("PRAGMA foreign_keys")).scalar_one() == 1
         for table in db.metadata.tables.values():

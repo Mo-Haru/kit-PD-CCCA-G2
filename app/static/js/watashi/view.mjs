@@ -1,0 +1,253 @@
+import { bytesToB64url, randomBytes } from "./bytes.mjs";
+import { api } from "./client.mjs";
+import {
+  clearQrSecrets,
+  entriesFromPayload,
+  fillAnswerList,
+  holdQrSecrets,
+  hpkeAad,
+  hpkeOpen,
+  parseShareFragment,
+  readQrSecrets,
+} from "./crypto.mjs";
+
+const OPENED = "wn-qr-opened";
+const STATE_LABEL = {
+  active: "有効",
+  stopped: "停止",
+  expired: "期限切れ",
+  used: "使用済み",
+};
+
+export function viewFacts(current) {
+  const state = STATE_LABEL[current && current.status] || "不明";
+  const updated = current && current.updated_at ? current.updated_at : "不明";
+  return {
+    validity: `有効状態: ${state}`,
+    updated: `共有の更新日時: ${updated}`,
+  };
+}
+
+export function describeViewError(error) {
+  const code = error && error.code;
+  if (code === "qr_used") return "この緊急用QRは使用済みです。内容は表示できません。";
+  if (code === "qr_expired") return "このQRの期限が切れています。内容は表示できません。";
+  if (code === "qr_stopped") return "このQRは停止されています。内容は表示できません。";
+  if (code === "qr_session_expired") return "閲覧の期限が切れています。同じ手続きでは再開できません。";
+  if (code === "qr_denied") return "このQRでは閲覧を開始できません。";
+  if (code === "decrypt_failed") return "復号に失敗しました。内容は表示していません。";
+  if (error && error.message) return error.message;
+  return "閲覧を開始できませんでした。";
+}
+
+export async function openSharedPayload(privateKey, current, shareId) {
+  const aad = hpkeAad({
+    purpose: "qr",
+    contextId: shareId,
+    ownerId: current.owner_user_id,
+    recipientId: "qr",
+    keyId: current.public_key,
+    version: current.current_version,
+  });
+  try {
+    const opened = await hpkeOpen(
+      privateKey,
+      decode(current.version.hpke_enc),
+      decode(current.version.ciphertext),
+      aad,
+    );
+    return JSON.parse(new TextDecoder().decode(opened));
+  } catch (_error) {
+    const error = new Error("復号に失敗しました。内容は表示していません。");
+    error.code = "decrypt_failed";
+    throw error;
+  }
+}
+
+export function captureQrSecrets(storage, locationLike, shareId) {
+  const parsed = parseShareFragment(locationLike.hash);
+  if (parsed) {
+    const secrets = { ...parsed, attempt: bytesToB64url(randomBytes(32)) };
+    holdQrSecrets(storage, shareId, secrets);
+    locationLike.hash = "";
+    if (typeof locationLike.replaceHash === "function") locationLike.replaceHash();
+    return secrets;
+  }
+  return readQrSecrets(storage, shareId);
+}
+
+export function replaceAttempt(storage, shareId) {
+  const secrets = readQrSecrets(storage, shareId);
+  if (!secrets) return null;
+  const next = { ...secrets, attempt: bytesToB64url(randomBytes(32)) };
+  holdQrSecrets(storage, shareId, next);
+  return next;
+}
+
+export async function resumeOrStartQr({ api: call, shareId, secrets, resumeOnly }) {
+  if (!secrets) {
+    const error = new Error("閲覧に必要な情報がこの端末にありません。QRのリンクをこの端末で開いてください。");
+    error.code = "missing_secret";
+    throw error;
+  }
+  let current = null;
+  try {
+    current = await call("/api/v1/qr-view/current");
+  } catch (error) {
+    if (resumeOnly || error.status !== 401) throw error;
+  }
+  if (current && current.id === shareId) return { current, started: null };
+  if (current && current.id !== shareId && resumeOnly) {
+    const error = new Error("別の共有の閲覧セッションです。このQRの内容は開いていません。");
+    error.code = "wrong_share";
+    throw error;
+  }
+  if (resumeOnly) {
+    const error = new Error("まだ内容を開いていません。");
+    error.code = "not_started";
+    throw error;
+  }
+  const started = await call(`/api/v1/qr-shares/${shareId}/start`, {
+    method: "POST",
+    body: { start_token: bytesToB64url(secrets.startToken), attempt_id: secrets.attempt },
+  });
+  current = await call("/api/v1/qr-view/current");
+  if (!current || current.id !== shareId) {
+    const error = new Error("別の共有の閲覧セッションです。");
+    error.code = "wrong_share";
+    throw error;
+  }
+  return { current, started };
+}
+
+export async function loadQrPage({ api: call, storage, shareId, secrets }) {
+  if (!secrets) return { action: "missing" };
+  if (storage.getItem(OPENED) !== shareId) return { action: "wait" };
+  try {
+    const result = await resumeOrStartQr({ api: call, shareId, secrets, resumeOnly: true });
+    return { action: "resume", result };
+  } catch (error) {
+    return { action: "wait", error };
+  }
+}
+
+function showPayload(container, payload) {
+  if (payload && payload.items && typeof payload.items === "object") {
+    fillAnswerList(container, entriesFromPayload(payload, null));
+    return;
+  }
+  container.replaceChildren();
+  const row = container.ownerDocument.createElement("p");
+  row.textContent = JSON.stringify(payload);
+  container.append(row);
+}
+
+function bindPage() {
+  const status = document.querySelector("#status");
+  const output = document.querySelector("#output");
+  const shareId = document.querySelector("#viewer").dataset.shareId;
+  const locationLike = {
+    hash: location.hash,
+    replaceHash() {
+      history.replaceState(null, "", location.pathname);
+    },
+  };
+
+  function show(text) {
+    status.textContent = text;
+  }
+
+  function showFacts(current) {
+    const facts = viewFacts(current);
+    document.querySelector("#validity").textContent = facts.validity;
+    document.querySelector("#updated").textContent = facts.updated;
+  }
+
+  async function render(current, secrets) {
+    showFacts(current);
+    const opened = await openSharedPayload(secrets.privateKey, current, shareId);
+    showPayload(output, opened);
+    const absolute = current.session?.absolute_expires_at || "";
+    show(`閲覧中です。絶対期限 ${absolute} は延長されません。`);
+  }
+
+  let busy = false;
+  async function openExplicit(secrets) {
+    if (busy) return;
+    busy = true;
+    const openButton = document.querySelector("#open");
+    openButton.disabled = true;
+    try {
+      const result = await resumeOrStartQr({ api, shareId, secrets, resumeOnly: false });
+      sessionStorage.setItem(OPENED, shareId);
+      await render(result.current, secrets);
+    } finally {
+      busy = false;
+      openButton.disabled = false;
+    }
+  }
+
+  const secrets = captureQrSecrets(sessionStorage, locationLike, shareId);
+  loadQrPage({ api, storage: sessionStorage, shareId, secrets }).then(async (plan) => {
+    if (plan.action === "missing") {
+      show("閲覧に必要な情報がこの端末にありません。QRのリンクをこの端末で開いてください。");
+      return;
+    }
+    if (plan.action === "resume") {
+      try {
+        await render(plan.result.current, secrets);
+      } catch (error) {
+        output.replaceChildren();
+        show(describeViewError(error));
+      }
+      return;
+    }
+    show(plan.error ? describeViewError(plan.error) : "内容を開くを押すまで、閲覧は開始しません。");
+  }).catch((error) => show(describeViewError(error)));
+
+  document.querySelector("#open").addEventListener("click", async () => {
+    const currentSecrets = readQrSecrets(sessionStorage, shareId);
+    try {
+      await openExplicit(currentSecrets);
+    } catch (error) {
+      output.replaceChildren();
+      show(describeViewError(error));
+    }
+  });
+
+  document.querySelector("#reopen").addEventListener("click", async () => {
+    const next = replaceAttempt(sessionStorage, shareId);
+    if (!next) {
+      show("閲覧に必要な情報がこの端末にありません。");
+      return;
+    }
+    try {
+      await openExplicit(next);
+    } catch (error) {
+      output.replaceChildren();
+      show(describeViewError(error));
+    }
+  });
+
+  document.querySelector("#end").addEventListener("click", async () => {
+    try {
+      await api("/api/v1/qr-view/end", { method: "POST", body: {} });
+    } catch (_error) {
+      /* 期限切れでも端末側の秘密は消す。 */
+    }
+    clearQrSecrets(sessionStorage);
+    sessionStorage.removeItem(OPENED);
+    output.replaceChildren();
+    show("閲覧を終了し、この端末に置いた秘密を消しました。");
+  });
+}
+
+function decode(value) {
+  const padded = value.replaceAll("-", "+").replaceAll("_", "/") + "=".repeat((4 - (value.length % 4)) % 4);
+  const binary = atob(padded);
+  const out = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) out[index] = binary.charCodeAt(index);
+  return out;
+}
+
+if (typeof document !== "undefined" && document.querySelector("#viewer")) bindPage();

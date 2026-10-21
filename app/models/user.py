@@ -51,6 +51,8 @@ class PasskeyCredential(IdentityMixin, CreatedMixin, Model):
     aaguid: Mapped[str | None] = mapped_column(String(36))
     label: Mapped[str | None] = mapped_column(String(100))
     last_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    # 追加パスキーは確認成功まで NULL。初回登録と移行先の登録は、その場で鍵を包むので時刻を入れる。
+    proven_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
     user: Mapped[User] = relationship(back_populates="passkeys")
