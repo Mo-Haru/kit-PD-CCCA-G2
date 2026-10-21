@@ -11,6 +11,7 @@ from flask import current_app
 from sqlalchemy import or_, update
 from sqlalchemy.exc import IntegrityError
 
+from app.contact_hash import HASH_VERSION, ContactHashKeyError, address_hmac
 from app.crypto_contract import CRYPTO_VERSION, HPKE_SUITE
 from app.extensions import db
 from app.models import (
@@ -86,14 +87,8 @@ def create_invitation(body: dict) -> dict:
         address = None
     elif kind == "email":
         expect_fields(body, EMAIL_FIELDS)
+        # 登録の有無で応答を分けない。未登録でも接続は作らず、同じ形の招待だけを返す。
         address = _email_hash(body.get("email"))
-        contact_owner = _owner_of_email(address)
-        if contact_owner is None:
-            fail("email_unverified", 409,
-                 "検証済みのメールアドレスを持つアカウントが見つかりません。メール送信機能は接続していないため、宛先指定の招待は完了できません。",
-                 action="invitation_create", target_type="invitation", actor_id=user.id)
-        if contact_owner == user.id:
-            fail("invalid_invitation", 400, "自分宛ての招待は作成できません。", actor_id=user.id)
     else:
         fail("invalid_invitation", 400, "招待の種類が正しくありません。", actor_id=user.id)
     pending = db.session.query(FamilyInvitation).filter(
@@ -109,6 +104,7 @@ def create_invitation(body: dict) -> dict:
         kind=kind,
         token_hash=hashlib.sha256(token).digest(),
         address_hash=address,
+        address_hash_version=None if address is None else HASH_VERSION,
         status="pending",
         expires_at=now + timedelta(seconds=int(current_app.config["INVITATION_TTL_SECONDS"])),
         created_at=now,
@@ -124,17 +120,19 @@ def create_invitation(body: dict) -> dict:
 
 
 def _email_hash(value) -> bytes:
-    if not isinstance(value, str):
+    try:
+        return address_hmac(value)
+    except ValueError:
         fail("invalid_email", 400, "メールアドレスの形式が正しくありません。")
-    normalized = value.strip().lower()
-    if "@" not in normalized or len(normalized) > 200 or any(ord(ch) < 32 for ch in normalized):
-        fail("invalid_email", 400, "メールアドレスの形式が正しくありません。")
-    return hashlib.sha256(normalized.encode("utf-8")).digest()
+    except ContactHashKeyError:
+        fail("contact_hash_unconfigured", 503, "メール照合の設定が未完了です。")
 
 
 def _owner_of_email(digest: bytes) -> str | None:
     from app.models import VerifiedContact
-    row = db.session.query(VerifiedContact).filter_by(kind="email", address_hash=digest).one_or_none()
+    row = db.session.query(VerifiedContact).filter_by(
+        kind="email", address_hash=digest, address_hash_version=HASH_VERSION,
+    ).one_or_none()
     return None if row is None else row.user_id
 
 
@@ -190,7 +188,8 @@ def accept_email_invitation(body: dict) -> dict:
     row = _by_token(body.get("token"))
     if row.kind != "email" or row.status != "pending" or row.address_hash is None:
         fail("invitation_invalid", 400, "この招待は使えません。", actor_id=user.id)
-    if _owner_of_email(row.address_hash) != user.id:
+    owner_id = _owner_of_email(row.address_hash)
+    if owner_id is None or owner_id != user.id or row.sender_user_id == user.id:
         fail("recipient_mismatch", 403, "この招待を受けられるアカウントではありません。",
              action="invitation_accept", target_type="invitation", target_id=row.id, actor_id=user.id)
     connection = _connect(row, user.id)
@@ -410,7 +409,7 @@ def update_share(share_id: str, body: dict) -> dict:
     share = db.session.get(FamilyShare, share_id)
     if share is None or share.owner_user_id != user.id:
         fail("not_found", 404, "共有が見つかりません。", actor_id=user.id)
-    if share.status == "stopped":
+    if share.status != "active" and share.status != "key_pending":
         fail("share_stopped", 409, "停止した共有は更新できません。", actor_id=user.id)
     connection = db.session.get(FamilyConnection, share.connection_id)
     if connection is None or connection.status != "active":
@@ -430,6 +429,7 @@ def update_share(share_id: str, body: dict) -> dict:
     data_key, nonce, owner_ct = _owner_copy(body, user.id)
     share.current_version = version
     share.recipient_key_id = current_key.id
+    # 新しい鍵向けの暗号文を同じ更新で保存したときだけ、配信可能な状態へ戻す。
     share.status = "active"
     db.session.add(FamilyShareVersion(
         share_id=share.id, version=version, hpke_enc=enc, ciphertext=ciphertext, crypto_suite=HPKE_SUITE,
@@ -550,39 +550,80 @@ def own_history(share_id: str) -> dict:
     }
 
 
-def _recipient_allowed(share: FamilyShare, user_id: str) -> bool:
-    if share.recipient_user_id != user_id or share.status == "stopped":
-        return False
-    if share.expires_at is not None and share.expires_at <= utcnow():
-        return False
+def _connection_active(share: FamilyShare) -> bool:
     connection = db.session.get(FamilyConnection, share.connection_id)
     return connection is not None and connection.status == "active"
 
 
-def _received_view(share: FamilyShare) -> dict:
+def _expired(share: FamilyShare) -> bool:
+    return share.expires_at is not None and share.expires_at <= utcnow()
+
+
+def _current_recipient_key(share: FamilyShare) -> bool:
+    key = db.session.get(UserEncryptionKey, share.recipient_key_id)
+    if key is None or key.user_id != share.recipient_user_id or key.status != "active" or key.purpose != "receive":
+        return False
+    current = _active_key(share.recipient_user_id)
+    return current is not None and current.id == key.id
+
+
+def _deliverable(share: FamilyShare, user_id: str) -> bool:
+    """受信者へ暗号文を返してよい共有。active かつ接続・期限・鍵が現在有効なときだけ。"""
+    return (
+        share.recipient_user_id == user_id
+        and share.status == "active"
+        and not _expired(share)
+        and _connection_active(share)
+        and _current_recipient_key(share)
+    )
+
+
+def _pending_notice(share: FamilyShare, user_id: str) -> bool:
+    """鍵の更新待ち。暗号文は返さないが、状態だけは受信者に見せる。"""
+    return (
+        share.recipient_user_id == user_id
+        and share.status == "key_pending"
+        and not _expired(share)
+        and _connection_active(share)
+    )
+
+
+def _received_view(share: FamilyShare, *, include_ciphertext: bool) -> dict:
     owner = db.session.get(User, share.owner_user_id)
-    return {
+    view = {
         "id": share.id,
         "status": share.status,
         "owner_user_id": share.owner_user_id,
         "owner_display_name": None if owner is None else owner.display_name,
-        "recipient_key_id": share.recipient_key_id,
         "current_version": share.current_version,
         "expires_at": iso(share.expires_at),
         "updated_at": iso(share.updated_at),
-        "current": _version_view(_version(share.id, share.current_version)),
     }
+    if include_ciphertext:
+        view["recipient_key_id"] = share.recipient_key_id
+        view["current"] = _version_view(_version(share.id, share.current_version))
+    return view
 
 
 def list_received() -> dict:
     user, _session, _passkey = load_login()
     rows = db.session.query(FamilyShare).filter_by(recipient_user_id=user.id).order_by(FamilyShare.created_at.desc()).limit(100).all()
-    return {"shares": [_received_view(row) for row in rows if _recipient_allowed(row, user.id)]}
+    shares = []
+    for row in rows:
+        if _deliverable(row, user.id):
+            shares.append(_received_view(row, include_ciphertext=True))
+        elif _pending_notice(row, user.id):
+            shares.append(_received_view(row, include_ciphertext=False))
+    return {"shares": shares}
 
 
 def get_received(share_id: str) -> dict:
     user, _session, _passkey = load_login()
     share = db.session.get(FamilyShare, share_id)
-    if share is None or not _recipient_allowed(share, user.id):
+    if share is None or share.recipient_user_id != user.id:
         fail("not_found", 404, "共有が見つかりません。", actor_id=user.id)
-    return {"share": _received_view(share)}
+    if _deliverable(share, user.id):
+        return {"share": _received_view(share, include_ciphertext=True)}
+    if _pending_notice(share, user.id):
+        return {"share": _received_view(share, include_ciphertext=False)}
+    fail("not_found", 404, "共有が見つかりません。", actor_id=user.id)

@@ -109,11 +109,14 @@ class VerifiedContact(IdentityMixin, CreatedMixin, Model):
         UniqueConstraint("kind", "address_hash"),
         CheckConstraint("kind IN ('email')", name="kind"),
         CheckConstraint("length(address_hash) = 32", name="address_hash_length"),
+        CheckConstraint("address_hash_version IN (1, 2)", name="address_hash_version"),
     )
 
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     kind: Mapped[str] = mapped_column(String(16))
     address_hash: Mapped[bytes] = mapped_column(LargeBinary(32))
+    # 1 は移行前の SHA-256。2 は HMAC-SHA256(秘密, SHA-256)。移行後に 1 は残さない。
+    address_hash_version: Mapped[int] = mapped_column(Integer, default=2)
     verified_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
 
 
@@ -137,6 +140,7 @@ class FamilyInvitation(IdentityMixin, CreatedMixin, Model):
     kind: Mapped[str] = mapped_column(String(16))
     token_hash: Mapped[bytes] = mapped_column(LargeBinary(32), unique=True)
     address_hash: Mapped[bytes | None] = mapped_column(LargeBinary(32))
+    address_hash_version: Mapped[int | None] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(24), default="pending")
     recipient_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), index=True)
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), index=True)

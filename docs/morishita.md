@@ -77,7 +77,9 @@ HKDFのsaltは、パスキーの包みでは封筒の `kdf_salt`、それ以外�
 
 署名カウンターが0の同期パスキーは、0のままもう一度成功します。0だからといって拒否しません。カウンターが増える認証器では、増えていない応答を拒否します。
 
-受信用の公開鍵はパスキーの認証用公開鍵とは別です。`GET /api/v1/encryption-keys/<user_id>` は、本人にはすべての鍵、接続中の相手には有効な鍵だけを返します。それ以外は404です。置き換えるときは `POST /api/v1/encryption-keys` に `public_key`、`replaces`、`acknowledge_key_change: true` が必要です。確認が無い置換は保存しません。その鍵宛ての有効な共有は `key_pending` になります。
+受信用の公開鍵はパスキーの認証用公開鍵とは別です。`GET /api/v1/encryption-keys/<user_id>` は、本人にはすべての鍵、接続中の相手には有効な鍵だけを返します。それ以外は404です。置き換えるときは `POST /api/v1/encryption-keys` に `public_key`、`replaces`、`acknowledge_key_change: true` が必要です。確認が無い置換は保存しません。その鍵宛ての `active` な共有は `key_pending` になります。停止済みの共有は `key_pending` にも `active` にも戻りません。
+
+`key_pending` のあいだ、受信者の一覧と個別取得は暗号文も所有者用コピーも返しません。一覧では状態だけを返すことがあります。期限切れ、停止、切断は404のままです。鍵を更新しても、すでに発行されたログインセッションは残りますが、そのセッションから旧暗号文は取得できません。所有者が現在の受信用鍵で `POST /api/v1/family/shares/<id>/update` し、新しい暗号文の保存が成功したときだけ `active` に戻ります。状態だけを戻す操作はありません。すでに受け取った暗号文をサーバーから消すことはできません。
 
 ## 回答の保存（今牧）
 
@@ -110,7 +112,11 @@ try {
 
 ## 家族共有
 
-メール送信機能は接続していません。宛先メールの招待は、`verified_contacts` に検証済みのハッシュがある相手だけ作れます。無いときは409で、入力したメールアドレスは応答に出しません。通常は `POST /api/v1/family/invitations` の `{ "kind": "open" }` を使います。
+メール送信機能は接続していません。通常は `POST /api/v1/family/invitations` の `{ "kind": "open" }` を使います。`{ "kind": "email", "email": "..." }` も受け付けますが、検証済みかどうかにかかわらず、形式が正しければ同じ200応答です。未登録のアドレスでは接続を作りません。招待一覧にもメールアドレスや登録有無は出しません。
+
+照合値は `HMAC-SHA256(CONTACT_HASH_KEY, SHA-256(正規化メール))` です。正規化は前後の空白を除き、小文字にします。保存版は `address_hash_version = 2` です。`CONTACT_HASH_KEY` は32バイト以上で、環境変数から読みます。リポジトリやDBには置きません。未設定や短すぎる値では計算せず、メール招待は503 `contact_hash_unconfigured` です。単純なSHA-256には戻しません。秘密を変えると照合結果も変わるため、変えたあとの既存行はそのままでは一致しません。
+
+既存のSHA-256行は、`init-db` の手順 `20261021_contact_hash_hmac` が `HMAC-SHA256(CONTACT_HASH_KEY, 保存済みSHA-256)` に置き換え、版を2にします。元のメールが無くても、新しい入力と同じ値になります。置き換え後に古いSHA-256は残しません。秘密が未設定で旧値が残っているときは変換せず失敗します。手順の再実行は、版2の行を変えません。
 
 応答の `token` は一度だけ返します。リンクは `/family/invite#token=<token>` です。トークンをクエリに付けないでください。ページを開いただけでは招待は消費しません。受信者が `POST /api/v1/family/invitations/request` を送り、招待者が `POST /api/v1/family/invitations/<id>/confirm` するまで接続されません。第三者は同じトークンを使えません。
 
@@ -118,7 +124,7 @@ try {
 
 更新は `POST /api/v1/family/shares/<id>/update` に `expected_version` を付けます。回答を保存しても共有の版は変わりません。停止は `POST .../stop`、期限変更は `POST /api/v1/family/shares/<id>/expiry` に `{ "expires_at": "2026-10-16T00:00:00Z" }` または期限を消す `null` です。受信者の次の取得から反映されます。受信者はこのAPIを呼べません。接続解除は `POST /api/v1/family/connections/<id>/disconnect` です。送信者・受信者のどちらからでも解除でき、その接続の共有は受信者から見えなくなります。相手がすでに復号して保存した内容は消せません。再接続しても、停止した共有は戻りません。新しい共有を作ってください。
 
-受信者は `GET /api/v1/family/received` と `GET /api/v1/family/received/<id>` で現在の版だけを受け取ります。期限切れ、停止、切断のあとは404です。`/family` では、復号した質問名と回答値を表示します。`answered` は値、`undecided` は「未定」、`declined` は「回答しない」、`unanswered` は「未回答」です。描画は `textContent` で行い、回答中のHTMLはスクリプトとして実行しません。
+受信者は `GET /api/v1/family/received` と `GET /api/v1/family/received/<id>` で、共有が `active` で、接続が有効、期限内、受信用鍵が現在の鍵であるときだけ暗号文を受け取ります。`key_pending` は状態だけで、暗号文はありません。期限切れ、停止、切断のあとは404です。再接続や鍵更新では、止めた共有を配信可能な状態へ戻しません。`/family` では、復号した質問名と回答値を表示します。`answered` は値、`undecided` は「未定」、`declined` は「回答しない」、`unanswered` は「未回答」です。描画は `textContent` で行い、回答中のHTMLはスクリプトとして実行しません。
 
 作成と更新のどちらも、先に「共有する内容を確認」で出した項目、相手、接続、受信用鍵ID、期限と、確定時のそれらが一致しているときだけ暗号化します。相手や期限や鍵を変えた場合も、チェックを外し、表示を消して、もう一度確認するまで保存しません。更新は、確認した相手と鍵IDがその共有のものと一致するときだけ行います。確認済みの `payload` を `createFamilyShare` と `updateFamilyShare` に渡すと、そのバイト列をそのまま暗号文にします。渡したあとに回答を読み直して別の内容へ付け替えません。`payload` を省いた呼び出しは、その時点の `selection` だけを暗号化し、未指定を全体共有にはしません。
 

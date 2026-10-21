@@ -299,15 +299,19 @@ async function refresh() {
   for (const share of receivedBody.shares) {
     const item = document.createElement("li");
     item.textContent = `${share.owner_display_name || share.owner_user_id} / ${share.status} / 版 ${share.current_version}`;
-    item.append(button("開く", async () => {
-      try {
-        const opened = await openReceivedShare(share);
-        fillAnswerList(document.querySelector("#received-view"), entriesFromPayload(opened, catalog));
-        show("受け取った回答を表示しました。");
-      } catch (error) {
-        show(error.message);
-      }
-    }));
+    if (share.current) {
+      item.append(button("開く", async () => {
+        try {
+          const opened = await openReceivedShare(share);
+          fillAnswerList(document.querySelector("#received-view"), entriesFromPayload(opened, catalog));
+          show("受け取った回答を表示しました。");
+        } catch (error) {
+          show(error.message);
+        }
+      }));
+    } else {
+      item.append(document.createTextNode(" 鍵が変わったため、再共有されるまで内容は届きません。"));
+    }
     received.append(item);
   }
 }

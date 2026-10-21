@@ -18,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from app.extensions import db
 from app.models import (
     AuditLog,
+    FamilyConnection,
     FamilyShare,
     PasskeyCredential,
     PrivateAnswerDocument,
@@ -368,24 +369,45 @@ def test_family_invitation_is_single_use_and_confirmed(client, app):
     assert reused.status_code == 400
     assert connection_id
     assert bob_body["user_id"] != owner["user_id"]
-    missing = post(client, "/api/v1/family/invitations", {"kind": "email", "email": "missing@example.test"})
-    assert missing.status_code == 409
-    assert "missing@example.test" not in missing.get_data(as_text=True)
+    from app.contact_hash import HASH_VERSION, address_hmac
+    unknown_email = "missing@example.test"
     email = "family@example.test"
     with app.app_context():
         db.session.add(VerifiedContact(
             user_id=bob_body["user_id"], kind="email",
-            address_hash=hashlib.sha256(email.encode()).digest(),
+            address_hash=address_hmac(email), address_hash_version=HASH_VERSION,
         ))
         db.session.commit()
-    emailed = post(client, "/api/v1/family/invitations", {"kind": "email", "email": email})
-    assert emailed.status_code == 200, emailed.get_json()
-    assert email not in emailed.get_data(as_text=True)
-    denied = post(outsider, "/api/v1/family/invitations/accept", {"token": emailed.get_json()["token"]})
+        connections_before = db.session.query(FamilyConnection).count()
+    unknown = post(client, "/api/v1/family/invitations", {"kind": "email", "email": unknown_email})
+    emailed = post(client, "/api/v1/family/invitations", {"kind": "email", "email": "Family@Example.test"})
+    assert unknown.status_code == emailed.status_code == 200
+    unknown_body = unknown.get_json()
+    emailed_body = emailed.get_json()
+    assert set(unknown_body) == set(emailed_body) == {"invitation", "token", "invite_path"}
+    assert set(unknown_body["invitation"]) == set(emailed_body["invitation"])
+    assert unknown_body["invitation"]["kind"] == emailed_body["invitation"]["kind"] == "email"
+    assert unknown_body["invitation"]["status"] == emailed_body["invitation"]["status"] == "pending"
+    assert unknown_body["invitation"]["recipient_display_name"] == emailed_body["invitation"]["recipient_display_name"]
+    listed = client.get("/api/v1/family/invitations").get_json()["invitations"]
+    email_rows = [row for row in listed if row["kind"] == "email"]
+    assert len(email_rows) == 2
+    assert {row["status"] for row in email_rows} == {"pending"}
+    assert {row["recipient_display_name"] for row in email_rows} == {None}
+    combined = unknown.get_data(as_text=True) + emailed.get_data(as_text=True) + client.get("/api/v1/family/invitations").get_data(as_text=True)
+    assert unknown_email not in combined and email not in combined and "Family@Example.test" not in combined
+    denied = post(outsider, "/api/v1/family/invitations/accept", {"token": emailed_body["token"]})
     assert denied.status_code == 403
-    accepted = post(bob, "/api/v1/family/invitations/accept", {"token": emailed.get_json()["token"]})
+    wrong = post(bob, "/api/v1/family/invitations/accept", {"token": unknown_body["token"]})
+    assert wrong.status_code == 403
+    assert wrong.get_json()["error"] == denied.get_json()["error"] == "recipient_mismatch"
+    accepted = post(bob, "/api/v1/family/invitations/accept", {"token": emailed_body["token"]})
     assert accepted.status_code == 409
     assert accepted.get_json()["error"] == "already_connected"
+    with app.app_context():
+        assert db.session.query(FamilyConnection).count() == connections_before
+        stored = db.session.query(VerifiedContact).filter_by(user_id=bob_body["user_id"]).one().address_hash
+        assert stored != hashlib.sha256(email.encode()).digest()
     assert invited["status"] in {"accepted", "pending", "awaiting_sender"}
 
 
@@ -872,6 +894,177 @@ def test_family_expiry_disconnect_and_reconnect_keeps_old_share_stopped(client, 
     confirmed = post(client, f"/api/v1/family/invitations/{invited.get_json()['invitation']['id']}/confirm")
     assert confirmed.status_code == 200, confirmed.get_json()
     assert recipient.get(f"/api/v1/family/received/{share_id}").status_code == 404
+
+
+def _no_secret_material(response, *markers):
+    body = response.get_data(as_text=True)
+    assert "ciphertext" not in body
+    assert "hpke_enc" not in body
+    assert "owner_copy" not in body
+    for marker in markers:
+        assert marker not in body
+
+
+def test_key_pending_stops_delivery_until_reencrypted(client, app):
+    register(client, "本人")
+    public, _private = hpke_keypair()
+    new_public, new_private = hpke_keypair()
+    recipient, _passkey, body, connection_id = connect_pair(app, client, None, "家族", public)
+    created, share_id, _aad = share_payload(
+        client, connection_id, body["user_id"], body["encryption_key_id"], public, b"version-one",
+    )
+    assert created.status_code == 200, created.get_json()
+    old_ciphertext = created.get_json()["share"]["current"]["ciphertext"]
+    before = recipient.get(f"/api/v1/family/received/{share_id}")
+    assert before.status_code == 200
+    assert before.get_json()["share"]["current"]["ciphertext"] == old_ciphertext
+    stopped, stopped_id, _stopped_aad = share_payload(
+        client, connection_id, body["user_id"], body["encryption_key_id"], public, b"stopped-share",
+    )
+    expired, expired_id, _expired_aad = share_payload(
+        client, connection_id, body["user_id"], body["encryption_key_id"], public, b"expired-share",
+    )
+    assert stopped.status_code == expired.status_code == 200
+    assert post(client, f"/api/v1/family/shares/{stopped_id}/stop").status_code == 200
+    with app.app_context():
+        row = db.session.get(FamilyShare, expired_id)
+        row.created_at = utcnow() - timedelta(days=2)
+        row.expires_at = utcnow() - timedelta(minutes=1)
+        db.session.commit()
+    changed = post(recipient, "/api/v1/encryption-keys", {
+        "public_key": b64encode(new_public),
+        "replaces": body["encryption_key_id"],
+        "acknowledge_key_change": True,
+    })
+    assert changed.status_code == 200, changed.get_json()
+    new_key_id = changed.get_json()["encryption_key_id"]
+    with app.app_context():
+        assert db.session.get(FamilyShare, share_id).status == "key_pending"
+        assert db.session.get(FamilyShare, stopped_id).status == "stopped"
+        assert db.session.get(FamilyShare, expired_id).status == "key_pending"
+    listed = recipient.get("/api/v1/family/received")
+    pending = next(row for row in listed.get_json()["shares"] if row["id"] == share_id)
+    assert pending["status"] == "key_pending"
+    assert "current" not in pending
+    direct = recipient.get(f"/api/v1/family/received/{share_id}")
+    assert direct.status_code == 200
+    assert direct.get_json()["share"]["status"] == "key_pending"
+    assert "current" not in direct.get_json()["share"]
+    _no_secret_material(listed, old_ciphertext)
+    _no_secret_material(direct, old_ciphertext)
+    assert recipient.get(f"/api/v1/family/received/{stopped_id}").status_code == 404
+    assert recipient.get(f"/api/v1/family/received/{expired_id}").status_code == 404
+    assert stopped_id not in listed.get_data(as_text=True)
+    assert expired_id not in listed.get_data(as_text=True)
+    source_copy = created.get_json()["share"]["owner_copy"]
+    owner_copy = {
+        "data_key_id": source_copy["data_key_id"],
+        "nonce": source_copy["nonce"],
+        "ciphertext": source_copy["ciphertext"],
+        "crypto_version": source_copy["crypto_version"],
+    }
+    aad = f"hpke-v1|family|{share_id}|ignored|{body['user_id']}|{new_key_id}|2".encode()
+    enc, ciphertext = hpke_seal(new_public, b"version-two", aad)
+    updated = post(client, f"/api/v1/family/shares/{share_id}/update", {
+        "expected_version": 1,
+        "recipient_key_id": new_key_id,
+        "confirmed": True,
+        "version": {"hpke_enc": b64encode(enc), "ciphertext": b64encode(ciphertext)},
+        "owner_copy": owner_copy,
+    })
+    assert updated.status_code == 200, updated.get_json()
+    assert updated.get_json()["share"]["status"] == "active"
+    renewed = recipient.get(f"/api/v1/family/received/{share_id}")
+    assert renewed.status_code == 200
+    assert renewed.get_json()["share"]["current"]["ciphertext"] == b64encode(ciphertext)
+    assert renewed.get_json()["share"]["current"]["ciphertext"] != old_ciphertext
+    opened = hpke_open(new_private, enc, ciphertext, aad)
+    assert opened == b"version-two"
+    refused = post(client, f"/api/v1/family/shares/{stopped_id}/update", {
+        "expected_version": 1,
+        "recipient_key_id": new_key_id,
+        "confirmed": True,
+        "version": {"hpke_enc": b64encode(enc), "ciphertext": b64encode(ciphertext)},
+        "owner_copy": owner_copy,
+    })
+    assert refused.status_code == 409
+    assert refused.get_json()["error"] == "share_stopped"
+    assert recipient.get(f"/api/v1/family/received/{expired_id}").status_code == 404
+    with app.app_context():
+        assert db.session.get(FamilyShare, stopped_id).status == "stopped"
+        assert db.session.get(FamilyShare, expired_id).status == "key_pending"
+    assert post(recipient, f"/api/v1/family/connections/{connection_id}/disconnect").status_code == 200
+    assert recipient.get(f"/api/v1/family/received/{share_id}").status_code == 404
+    invited = post(client, "/api/v1/family/invitations", {"kind": "open"})
+    assert post(recipient, "/api/v1/family/invitations/request", {"token": invited.get_json()["token"]}).status_code == 200
+    assert post(client, f"/api/v1/family/invitations/{invited.get_json()['invitation']['id']}/confirm").status_code == 200
+    assert recipient.get(f"/api/v1/family/received/{share_id}").status_code == 404
+    assert recipient.get(f"/api/v1/family/received/{stopped_id}").status_code == 404
+    assert recipient.get(f"/api/v1/family/received/{expired_id}").status_code == 404
+    with app.app_context():
+        assert db.session.get(FamilyShare, share_id).status == "stopped"
+        assert db.session.get(FamilyShare, stopped_id).status == "stopped"
+        assert db.session.get(FamilyShare, expired_id).status == "stopped"
+
+
+def test_email_hash_migration_and_missing_secret(client, app):
+    from app.contact_hash import HASH_VERSION, address_hmac
+    from app.schema_upgrade import _migrate_contact_hashes, apply_schema_upgrades
+    _passkey, owner, _public = register(client, "照合する人")
+    normalized = "family@example.test"
+    legacy = hashlib.sha256(normalized.encode()).digest()
+    with app.app_context():
+        user = db.session.get(User, owner["user_id"])
+        db.session.add(VerifiedContact(
+            user_id=user.id, kind="email", address_hash=legacy, address_hash_version=1,
+        ))
+        db.session.commit()
+        db.session.execute(text("ALTER TABLE verified_contacts RENAME TO verified_contacts_legacy"))
+        db.session.execute(text(
+            "CREATE TABLE verified_contacts ("
+            "id VARCHAR(36) NOT NULL PRIMARY KEY, created_at DATETIME NOT NULL, "
+            "user_id VARCHAR(36) NOT NULL, kind VARCHAR(16) NOT NULL, "
+            "address_hash BLOB NOT NULL, verified_at DATETIME NOT NULL)"
+        ))
+        db.session.execute(text(
+            "INSERT INTO verified_contacts (id, created_at, user_id, kind, address_hash, verified_at) "
+            "SELECT id, created_at, user_id, kind, address_hash, verified_at FROM verified_contacts_legacy"
+        ))
+        db.session.execute(text("DROP TABLE verified_contacts_legacy"))
+        db.session.commit()
+        app.config["CONTACT_HASH_KEY"] = None
+        with pytest.raises(RuntimeError, match="CONTACT_HASH_KEY"):
+            _migrate_contact_hashes()
+        unchanged = db.session.execute(text("SELECT address_hash FROM verified_contacts")).scalar()
+        assert bytes(unchanged) == legacy
+        app.config["CONTACT_HASH_KEY"] = "test-only-contact-hash-key-32b!!"
+        _migrate_contact_hashes()
+        stored, version = db.session.execute(text(
+            "SELECT address_hash, address_hash_version FROM verified_contacts"
+        )).one()
+        stored = bytes(stored)
+        assert stored != legacy
+        assert stored == address_hmac("Family@Example.test")
+        assert version == HASH_VERSION
+        _migrate_contact_hashes()
+        assert bytes(db.session.execute(text("SELECT address_hash FROM verified_contacts")).scalar()) == stored
+        apply_schema_upgrades()
+        apply_schema_upgrades()
+        assert bytes(db.session.execute(text("SELECT address_hash FROM verified_contacts")).scalar()) == stored
+        app.config["CONTACT_HASH_KEY"] = "another-test-contact-hash-key-32b!"
+        assert address_hmac(normalized) != stored
+        app.config["CONTACT_HASH_KEY"] = None
+    missing = post(client, "/api/v1/family/invitations", {"kind": "email", "email": "nobody@example.test"})
+    assert missing.status_code == 503
+    assert missing.get_json()["error"] == "contact_hash_unconfigured"
+    assert "nobody@example.test" not in missing.get_data(as_text=True)
+    with app.app_context():
+        leaked = hashlib.sha256(b"nobody@example.test").digest()
+        found = db.session.execute(text(
+            "SELECT COUNT(*) FROM family_invitations WHERE address_hash = :digest"
+        ), {"digest": leaked}).scalar()
+        assert found == 0
+        app.config["CONTACT_HASH_KEY"] = "test-only-contact-hash-key-32b!!"
 
 
 def test_emergency_idle_expiry_cannot_be_retried(client, app):

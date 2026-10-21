@@ -24,8 +24,16 @@ def env_or(name, default):
     return value or default
 
 
+def contact_hash_key_from_environ():
+    """連絡先照合の秘密。未設定や空白は None であり、弱い既定値へ落とさない。"""
+    value = os.environ.get("CONTACT_HASH_KEY", "").strip()
+    return value or None
+
+
 class BaseConfig:
     SECRET_KEY = env_or("SECRET_KEY", "dev-change-me")
+    # メール照合用。未設定なら None。開発用の固定秘密にはしない。
+    CONTACT_HASH_KEY = contact_hash_key_from_environ()
     SQLALCHEMY_DATABASE_URI = env_or("DATABASE_URL", DEFAULT_DATABASE_URI)
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     WEBAUTHN_RP_ID = env_or("WEBAUTHN_RP_ID", "localhost")
@@ -60,6 +68,7 @@ class DevelopmentConfig(BaseConfig):
 class TestingConfig(BaseConfig):
     TESTING = True
     SECRET_KEY = "test-only"
+    CONTACT_HASH_KEY = "test-only-contact-hash-key-32b!!"
     WEBAUTHN_ORIGIN = "http://localhost"
     SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
     SQLALCHEMY_ENGINE_OPTIONS = {
