@@ -120,6 +120,73 @@ def _add_migration_decrypt_confirmed() -> None:
     db.session.commit()
 
 
+def _legacy_contact_rows(table: str, has_version: bool):
+    if has_version:
+        return db.session.execute(text(
+            f"SELECT id, address_hash FROM {table} "
+            "WHERE address_hash IS NOT NULL AND "
+            "(address_hash_version IS NULL OR address_hash_version < 2)"
+        )).all()
+    return db.session.execute(text(
+        f"SELECT id, address_hash FROM {table} WHERE address_hash IS NOT NULL"
+    )).all()
+
+
+def _migrate_contact_hashes() -> None:
+    """SHA-256 の照合値を HMAC へ置き換える。旧ダイジェストは残さない。
+
+    新方式は HMAC-SHA256(秘密, SHA-256(正規化メール))。既存行は元メールが無いので、
+    HMAC-SHA256(秘密, 保存済みSHA-256) に置き換える。これは新規入力と同じ値になる。
+    版が 2 の行は再実行しても変えない。秘密が無いときは SHA-256 のままにせず失敗する。
+    """
+    from app.contact_hash import HASH_VERSION, ContactHashKeyError, upgrade_legacy_digest
+
+    inspector = inspect(db.engine)
+    pending: list[tuple[str, str, bytes]] = []
+    for table in ("verified_contacts", "family_invitations"):
+        if table not in inspector.get_table_names():
+            continue
+        names = {column["name"] for column in inspector.get_columns(table)}
+        if "address_hash" not in names:
+            continue
+        has_version = "address_hash_version" in names
+        rows = _legacy_contact_rows(table, has_version)
+        if not has_version:
+            if rows:
+                try:
+                    upgrade_legacy_digest(rows[0][1])
+                except ContactHashKeyError as exc:
+                    raise RuntimeError(
+                        "CONTACT_HASH_KEY が未設定です。照合用ハッシュは変換せず、SHA-256のままにはしません。"
+                    ) from exc
+            column = (
+                "INTEGER NOT NULL DEFAULT 1"
+                if table == "verified_contacts"
+                else "INTEGER"
+            )
+            db.session.execute(text(
+                f"ALTER TABLE {table} ADD COLUMN address_hash_version {column}"
+            ))
+            db.session.commit()
+            rows = _legacy_contact_rows(table, True)
+        for row_id, digest in rows:
+            pending.append((table, row_id, bytes(digest)))
+    if not pending:
+        return
+    try:
+        upgraded = [(table, row_id, upgrade_legacy_digest(digest)) for table, row_id, digest in pending]
+    except ContactHashKeyError as exc:
+        raise RuntimeError(
+            "CONTACT_HASH_KEY が未設定です。照合用ハッシュは変換せず、SHA-256のままにはしません。"
+        ) from exc
+    for table, row_id, digest in upgraded:
+        db.session.execute(text(
+            f"UPDATE {table} SET address_hash = :digest, address_hash_version = :version "
+            "WHERE id = :row_id"
+        ), {"digest": digest, "version": HASH_VERSION, "row_id": row_id})
+    db.session.commit()
+
+
 def _add_passkey_proven_at() -> None:
     """既存のパスキーは確認済みとして残し、追加分だけ確認待ちにできるようにする。"""
     inspector = inspect(db.engine)
@@ -143,6 +210,7 @@ STEPS = (
     ("20261015_migration_decrypt_confirmed", _add_migration_decrypt_confirmed),
     ("20261015_prove_passkey_purpose", _allow_prove_passkey_challenge),
     ("20261020_passkey_proven_at", _add_passkey_proven_at),
+    ("20261021_contact_hash_hmac", _migrate_contact_hashes),
 )
 
 

@@ -13,6 +13,17 @@ def test_env_or_ignores_blank_values(monkeypatch):
     assert env_or("DATABASE_URL", "sqlite:///fallback") == "sqlite:///custom.db"
 
 
+def test_blank_contact_hash_key_is_not_replaced(monkeypatch):
+    from config import contact_hash_key_from_environ
+
+    monkeypatch.delenv("CONTACT_HASH_KEY", raising=False)
+    assert contact_hash_key_from_environ() is None
+    monkeypatch.setenv("CONTACT_HASH_KEY", "   ")
+    assert contact_hash_key_from_environ() is None
+    monkeypatch.setenv("CONTACT_HASH_KEY", "x" * 32)
+    assert contact_hash_key_from_environ() == "x" * 32
+
+
 def test_default_database_is_local_sqlite():
     assert DEFAULT_DATABASE_URI.startswith("sqlite:///")
     assert DEFAULT_DATABASE_URI.endswith("instance/dev.db")

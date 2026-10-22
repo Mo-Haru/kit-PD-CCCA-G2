@@ -522,10 +522,18 @@ check("a later key is not already confirmed", !confirmationStillMatches(
   previewKey, previewSelection, previewPayload, { ...confirmedContext, recipientKeyId: "key-2" },
 ));
 check("an empty confirmation matches nothing", !confirmationStillMatches("", previewSelection, previewPayload, confirmedContext));
+check("the same connection accepts the newly confirmed key", confirmationCoversShare({
+  ...confirmedContext, recipientKeyId: "new-key",
+}, {
+  recipient_user_id: "user-2", connection_id: "conn-1", recipient_key_id: "old-key",
+}));
 check("update stays on the confirmed recipient", confirmationCoversShare(confirmedContext, {
-  recipient_user_id: "user-2", recipient_key_id: "key-1",
+  recipient_user_id: "user-2", connection_id: "conn-1", recipient_key_id: "key-1",
 }) && !confirmationCoversShare(confirmedContext, {
-  recipient_user_id: "user-9", recipient_key_id: "key-1",
+  recipient_user_id: "user-9", connection_id: "conn-1", recipient_key_id: "key-1",
+}));
+check("another connection is not updated from this confirmation", !confirmationCoversShare(confirmedContext, {
+  recipient_user_id: "user-2", connection_id: "conn-9", recipient_key_id: "key-1",
 }));
 
 const confirmedPayload = plaintextForSelection(stored, catalog, { scope: "questions", ids: ["no"] });

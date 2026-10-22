@@ -52,9 +52,13 @@ LINE API を使うかどうかは未決定です。
 - Flask-SQLAlchemy 3.1.1
 - SQLAlchemy `>=2.0,<2.1`
 - python-dotenv 1.2.4
-- pytest 9.1.1（開発用）
 - webauthn 2.7.1（パスキー検証）
+- Click 8.5.0（`init-db` コマンド）
+- pytest 9.1.1（開発用）
 - pyhpke 0.6.5（開発用。テストがブラウザの HPKE と相互に復号できることを確認する）
+- cbor2 6.1.5（開発用。模擬パスキーの認証データ）
+- cryptography 50.0.2（開発用。模擬パスキーの署名）
+- pip-audit 2.10.1（開発用。依存関係の脆弱性確認）
 
 インストール時に入る間接的な依存のバージョンは、`Pipfile.lock` に記録できます。そのファイルは既存の設定どおりリポジトリへは含めません。
 
@@ -110,7 +114,7 @@ $env:PIPENV_VENV_IN_PROJECT = "1"
 python -m pipenv install --dev --python 3.14
 ```
 
-`.env` のコピーは省略できます。省略しても、開発用の暫定値（SQLite とダミーの `SECRET_KEY`）で起動します。設定を変えるときだけ `.env` を編集します。`.env.example` に秘密情報は入っていません。
+`.env` のコピーは省略できます。省略しても、開発用の暫定値（SQLite とダミーの `SECRET_KEY`）で起動します。設定を変えるときだけ `.env` を編集します。`.env.example` に秘密情報は入っていません。メール招待の照合に使う `CONTACT_HASH_KEY` には暫定値を置いていません。未設定のままではメール招待を作らず、単純なSHA-256へは落としません。
 
 `init-db` は、未作成のテーブルを作り、その後 `app/schema_upgrade.py` の未適用手順だけを実行します。既存の行は削除しません。列の追加や、チャレンジ用途の許可値を広げる手順は、既存行をコピーして残します。このコマンドを二回実行しても、既存データは消えません。
 
@@ -363,8 +367,8 @@ push のあと、GitHub のリポジトリページで **Compare & pull request*
 
 次の確認は Linux 上の Python 3.14.8 と Pipenv 2026.9.1 で行いました。仮想環境は `PIPENV_VENV_IN_PROJECT=1` によりリポジトリ内の `.venv` に作り、`python3.14 -m pipenv install --dev --python 3.14` で依存を入れています。Windows での起動確認はまだです。PowerShell の `py -3.14 -m pipenv` は、この Linux 環境では `python3.14 -m pipenv` に読み替えて確認しています。
 
-- `Pipfile` から Flask 3.1.3、Flask-SQLAlchemy 3.1.1、python-dotenv 1.2.4、pytest 9.1.1 をインストールできる
-- `python -m pytest` は 63 件成功する。Node.js が暗号テストを実行する
+- `Pipfile` から Flask 3.1.3、Flask-SQLAlchemy 3.1.1、python-dotenv 1.2.4、Click 8.5.0、pytest 9.1.1、cbor2 6.1.5、cryptography 50.0.2、pip-audit 2.10.1 をインストールできる
+- `python -m pytest` は 67 件成功する。Node.js が暗号テストと家族画面の再確認操作を実行する
 - `instance/dev.db` に確認用の行を入れてから `init-db` を 2 回実行し、その行が残る
 - `http://localhost:5000/` で起動し、`/`、`/hello`、`/answers`、`/sharing`、`/auth`、`/family`、`/transfer`、`/health` が 200 になる
 - `/` は「意思の記録」を表示する
