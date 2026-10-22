@@ -368,7 +368,7 @@ push のあと、GitHub のリポジトリページで **Compare & pull request*
 次の確認は Linux 上の Python 3.14.8 と Pipenv 2026.9.1 で行いました。仮想環境は `PIPENV_VENV_IN_PROJECT=1` によりリポジトリ内の `.venv` に作り、`python3.14 -m pipenv install --dev --python 3.14` で依存を入れています。Windows での起動確認はまだです。PowerShell の `py -3.14 -m pipenv` は、この Linux 環境では `python3.14 -m pipenv` に読み替えて確認しています。
 
 - `Pipfile` から Flask 3.1.3、Flask-SQLAlchemy 3.1.1、python-dotenv 1.2.4、Click 8.5.0、pytest 9.1.1、cbor2 6.1.5、cryptography 50.0.2、pip-audit 2.10.1 をインストールできる
-- `python -m pytest` は 66 件成功する。Node.js が暗号テストを実行する
+- `python -m pytest` は 67 件成功する。Node.js が暗号テストと家族画面の再確認操作を実行する
 - `instance/dev.db` に確認用の行を入れてから `init-db` を 2 回実行し、その行が残る
 - `http://localhost:5000/` で起動し、`/`、`/hello`、`/answers`、`/sharing`、`/auth`、`/family`、`/transfer`、`/health` が 200 になる
 - `/` は「意思の記録」を表示する

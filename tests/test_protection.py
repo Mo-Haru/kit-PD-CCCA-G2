@@ -1382,3 +1382,10 @@ def test_browser_and_python_hpke_interoperate(tmp_path):
         ["node", "tests/page_flows.mjs"], cwd=ROOT, capture_output=True, text=True, check=False,
     )
     assert flows.returncode == 0, flows.stderr + flows.stdout
+
+
+def test_family_page_reconfirms_the_current_key():
+    rekey = subprocess.run(
+        ["node", "tests/family_rekey_page.mjs"], cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    assert rekey.returncode == 0, rekey.stderr + rekey.stdout

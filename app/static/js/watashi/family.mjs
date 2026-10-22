@@ -42,9 +42,9 @@ export function confirmationStillMatches(rememberedKey, selection, payload, cont
 }
 
 export function confirmationCoversShare(context, share) {
-  return Boolean(context)
+  return Boolean(context && context.connectionId && context.recipientKeyId)
     && context.recipientUserId === share.recipient_user_id
-    && context.recipientKeyId === share.recipient_key_id;
+    && context.connectionId === share.connection_id;
 }
 
 async function syncAccess() {
@@ -220,6 +220,9 @@ async function refresh() {
   for (const share of ownBody.shares) {
     const item = document.createElement("li");
     item.textContent = `${share.recipient_display_name || share.recipient_user_id} / ${share.status} / 版 ${share.current_version} / 期限 ${share.expires_at || "なし"}`;
+    if (share.status === "key_pending") {
+      item.append(document.createTextNode(" 相手の受信用鍵が変わっています。確認した現在の鍵で更新してください。"));
+    }
     if (share.owner_copy) {
       item.append(button("今の内容", async () => {
         try {
@@ -239,14 +242,14 @@ async function refresh() {
         const confirmed = await requireConfirmedPayload();
         if (!confirmationCoversShare(confirmed.context, share)) {
           clearConfirmation();
-          show("確認した相手と鍵がこの共有と違います。もう一度確認してください。");
+          show("確認した相手と接続がこの共有と違います。もう一度確認してください。");
           return;
         }
         await updateFamilyShare({
           shareId: share.id,
           expectedVersion: share.current_version,
           recipientUserId: share.recipient_user_id,
-          recipientKeyId: share.recipient_key_id,
+          recipientKeyId: confirmed.context.recipientKeyId,
           selection: currentSelection(),
           payload: confirmed.payload,
         });
