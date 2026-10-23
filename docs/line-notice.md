@@ -1,4 +1,4 @@
-# LINE接続テスト（notice.py）
+# LINE接続テスト（notice/notice.py）
 
 このBotはLINEのテキストをそのまま返す**接続確認専用**です。人生会議の回答や実在の個人情報は送らないでください。既存の `run.py`（5000番）とは別の5001番ポートで起動します。
 
@@ -21,7 +21,7 @@ LINE_CHANNEL_SECRET=取得したチャネルシークレット
 4. 次のコマンドで起動する。
 
 ```powershell
-py -3.14 -m pipenv run python notice.py
+py -3.14 -m pipenv run python notice/notice.py
 ```
 
 5. ブラウザで http://127.0.0.1:5001/ を開き、「LINE Echo Bot is running.」を確認する。
