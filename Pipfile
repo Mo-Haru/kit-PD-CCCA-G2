@@ -10,6 +10,7 @@ sqlalchemy = ">=2.0,<2.1"
 python-dotenv = "==1.2.4"
 webauthn = "==2.7.1"
 click = "==8.5.0"
+line-bot-sdk = "==3.26.0"
 
 [dev-packages]
 pytest = "==9.1.1"
