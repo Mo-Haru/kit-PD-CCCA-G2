@@ -1,19 +1,41 @@
 {% extends "base.html" %}
 {% block title %}共有 | 意思の記録{% endblock %}
+{% block extra_head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/morishita.css') }}">
+{% endblock %}
 {% block content %}
-  <h1>共有</h1>
-  <p><span class="badge">未実装</span></p>
-  <p>本人が明示的に最新の意思を共有する方式を検討しています。回答の更新を共有先へ自動では反映しません。</p>
-  <ul>
-    <li>共有の有効・無効: 未実装</li>
-    <li>共有の期限: 未実装</li>
-    <li>QRコード: 未実装</li>
-  </ul>
-  <fieldset disabled>
-    <legend>共有設定（未実装）</legend>
-    <button type="button">共有を有効にする（未実装）</button>
-    <button type="button">QRコードを表示（未実装）</button>
-  </fieldset>
-  <p class="note">この操作は実行できません。</p>
-  <p class="note">編集場所: <code>app/blueprints/sharing.py</code> と <code>app/templates/sharing/</code></p>
+  <div class="sensitive">
+    <h1>共有</h1>
+    <p>本人が明示的に最新の意思を共有するときに使います。回答を後から保存しても、この共有は自動では変わりません。</p>
+    <p>別の画面へ移ると鍵は破棄されるので、この画面でログインし、鍵を解除してからQRを作ってください。</p>
+    <p id="lock-state">状態を確認しています。</p>
+    <p id="status" role="status" aria-live="polite"></p>
+    <button id="login-here" type="button">この画面でログイン</button>
+    <button id="unlock-here" type="button">この画面で鍵を解除</button>
+
+    <h2>共有する範囲</h2>
+    <fieldset>
+      <legend>範囲</legend>
+      <label><input type="radio" name="scope" value="all"> 全体</label>
+      <label><input type="radio" name="scope" value="chapters"> 章</label>
+      <label><input type="radio" name="scope" value="questions" checked> 質問</label>
+    </fieldset>
+    <div id="chapters"></div>
+    <div id="questions"></div>
+
+    <h2>種類</h2>
+    <fieldset>
+      <legend>種類</legend>
+      <label><input type="radio" name="mode" value="emergency" checked> 緊急用（最初の閲覧だけ。期限は付けられません）</label>
+      <label><input type="radio" name="mode" value="timed"> 期限付き（最長31日。期限まで複数回開けます）</label>
+    </fieldset>
+    <label for="expires-at">期限（種類が「期限付き」のときに入力）</label>
+    <input id="expires-at" type="datetime-local" disabled>
+
+    <button id="create-qr" type="button">QRコードを作る</button>
+    <div id="qr-output"></div>
+
+    <p class="note">有効・無効の切り替えと期限の変更は未実装です。</p>
+  </div>
+  <script type="module" src="{{ url_for('static', filename='js/watashi/sharing.mjs') }}"></script>
 {% endblock %}
