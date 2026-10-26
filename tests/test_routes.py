@@ -1,4 +1,9 @@
-FEATURE_PAGES = ("/answers", "/sharing")
+import subprocess
+from html.parser import HTMLParser
+from pathlib import Path
+
+
+FEATURE_PAGES = ("/answers",)
 FORBIDDEN_PHRASES = ("ログインしました", "保存しました", "暗号化しました", "共有しました")
 
 
@@ -17,8 +22,73 @@ def test_home_explains_the_foundation(client):
     assert "運営サーバーに回答の内容を読ませない" in body
     assert 'href="/answers"' in body
     assert 'href="/sharing"' in body
-    assert 'href="/auth"' in body
+    assert 'href="/auth?next=' in body
     assert 'href="/health"' in body
+
+
+def test_auth_page_is_standalone(client):
+    response = client.get("/auth")
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert '<body class="account-body">' in body
+    assert '<main id="main" class="account-shell">' in body
+    assert 'id="register-form"' in body
+    assert 'id="login"' in body
+    assert "auth-entry.mjs" in body
+    assert 'id="privacy-consent"' in body
+    assert 'id="account-actions"' not in body
+    for shared_layout in ("<header", "<nav", "<footer", 'class="banner"', "header-session.mjs"):
+        assert shared_layout not in body
+
+    class AuthMarkup(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.open_tags = []
+            self.parents = {}
+
+        def handle_starttag(self, tag, attrs):
+            element_id = dict(attrs).get("id")
+            if element_id:
+                self.parents[element_id] = tuple(self.open_tags)
+            if tag not in {"meta", "link", "input"}:
+                self.open_tags.append((tag, element_id))
+
+        def handle_endtag(self, tag):
+            assert self.open_tags and self.open_tags[-1][0] == tag
+            self.open_tags.pop()
+
+    markup = AuthMarkup()
+    markup.feed(body)
+    markup.close()
+    assert not markup.open_tags
+    assert ("fieldset", "register-fields") in markup.parents["display-name"]
+    assert ("fieldset", "register-fields") in markup.parents["privacy-consent"]
+
+
+def test_common_pages_have_session_header(client):
+    for path in ("/", "/answers", "/sharing", "/family", "/family/invite", "/transfer", "/view/layout-check"):
+        response = client.get(path)
+        body = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert 'id="header-account"' in body
+        assert 'id="header-session-label"' in body
+        assert 'id="header-session-name"' in body
+        assert 'id="header-account-link"' in body
+        assert 'href="/auth?next=' in body
+        assert 'data-account-url="/account"' in body
+        assert "header-session.mjs" in body
+
+
+def test_header_session_display_states():
+    result = subprocess.run(
+        ["node", "tests/header_session.mjs"],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_health_reports_database_connection(client):
@@ -43,7 +113,6 @@ def test_feature_pages_are_marked_unimplemented(client):
 def test_feature_pages_name_their_files(client):
     expectations = {
         "/answers": "app/blueprints/answers.py",
-        "/sharing": "app/blueprints/sharing.py",
     }
     for path, needle in expectations.items():
         body = client.get(path).get_data(as_text=True)
@@ -51,9 +120,32 @@ def test_feature_pages_name_their_files(client):
 
 
 def test_unimplemented_actions_reject_post(client):
-    for path in (*FEATURE_PAGES, "/auth"):
+    for path in (*FEATURE_PAGES, "/sharing", "/answers/demo", "/auth"):
         response = client.post(path)
         assert response.status_code == 405
+
+
+def test_sharing_uses_real_client_and_requires_explicit_confirmation(client):
+    from tests.test_menu import StrictMarkup
+
+    response = client.get("/sharing")
+    assert response.status_code == 200
+    markup = StrictMarkup(response.get_data(as_text=True))
+    markup.module_script("/static/js/watashi/sharing.mjs")
+    for element_id in ("share-fields", "confirm-share", "create-qr"):
+        assert "disabled" in markup.one_id(element_id).attrs
+    assert "hidden" in markup.one_id("qr-output").attrs
+    assert "readonly" in markup.one_id("share-url").attrs
+    assert response.headers["Cache-Control"] == "no-store"
+    assert client.get("/static/js/watashi/sharing.mjs").status_code == 200
+
+
+def test_sharing_preview_confirmation_failure_and_stop():
+    result = subprocess.run(
+        ["node", "tests/sharing_page.mjs"], cwd=Path(__file__).resolve().parents[1],
+        capture_output=True, text=True, timeout=20, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_unknown_page_returns_404(client):

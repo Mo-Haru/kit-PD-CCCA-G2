@@ -17,13 +17,18 @@
     <p id="source-state"></p>
     <p>照合コード: <strong id="source-code"></strong></p>
     <p>指紋: <strong id="source-fingerprint"></strong></p>
-    <label for="typed-code">新しい端末に出ている照合コード</label>
-    <input id="typed-code" name="typed-code" autocomplete="off" inputmode="text">
+    <div class="md-field">
+      <label class="md-field-label" for="typed-code">照合コード</label>
+      <input id="typed-code" class="md-field-control" name="typed-code" autocomplete="off" inputmode="text" placeholder=" " aria-describedby="typed-code-help">
+      <p id="typed-code-help" class="md-field-help">新しい端末に出ている照合コードを入力してください。</p>
+    </div>
     <button id="source-approve" type="button">コードと指紋を承認</button>
     <button id="source-cancel" type="button">移行を取り消す</button>
     <h2>新しい端末</h2>
-    <label for="target-id">移行ID</label>
-    <input id="target-id" name="target-id" autocomplete="off">
+    <div class="md-field">
+      <label class="md-field-label" for="target-id">移行ID</label>
+      <input id="target-id" class="md-field-control" name="target-id" autocomplete="off" placeholder=" ">
+    </div>
     <button id="target-bind" type="button">この端末の鍵を登録</button>
     <p>照合コード: <strong id="target-code"></strong></p>
     <p>指紋: <strong id="target-fingerprint"></strong></p>

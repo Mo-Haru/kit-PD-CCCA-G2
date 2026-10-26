@@ -1,0 +1,482 @@
+.account-body {
+  min-height: 100vh;
+  background: var(--md-sys-color-surface-container-low);
+}
+
+.account-shell {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  width: min(560px, calc(100% - 2rem));
+  min-height: 100vh;
+  min-height: 100svh;
+  margin: 0 auto;
+  padding: clamp(1.5rem, 4vw, 3rem) 0;
+}
+
+.account-brand,
+.account-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  min-height: var(--md-comp-minimum-touch-target-size);
+  max-width: 100%;
+  padding: 0.75rem 1.25rem;
+  border-radius: var(--md-sys-shape-corner-full);
+  overflow-wrap: anywhere;
+}
+
+.account-brand {
+  margin-bottom: 1rem;
+  color: var(--md-sys-color-on-surface);
+  font-size: var(--md-sys-typescale-title-large-size);
+  font-weight: 400;
+  line-height: var(--md-sys-typescale-title-large-line-height);
+  text-decoration: none;
+}
+
+.account-back {
+  margin-top: 1rem;
+  color: var(--md-sys-color-primary);
+  font-size: var(--md-sys-typescale-label-large-size);
+  line-height: var(--md-sys-typescale-label-large-line-height);
+  text-underline-offset: 0.2em;
+}
+
+.account-page {
+  width: 100%;
+  margin: 0;
+  padding: clamp(1.5rem, 4vw, 2.5rem);
+  border: 0;
+  border-radius: var(--md-sys-shape-corner-extra-large);
+  background: var(--md-sys-color-surface);
+  color: var(--md-sys-color-on-surface);
+  overflow-wrap: anywhere;
+}
+
+.account-page.account-settings {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.account-page [hidden] {
+  display: none !important;
+}
+
+.account-page .account-eyebrow {
+  margin: 0 0 0.5rem;
+  color: var(--md-sys-color-primary);
+  font-size: var(--md-sys-typescale-label-large-size);
+  font-weight: 500;
+  line-height: var(--md-sys-typescale-label-large-line-height);
+  letter-spacing: 0.1px;
+}
+
+.account-page h1 {
+  margin: 0 0 0.75rem;
+  font-size: clamp(1.75rem, 4vw, 2rem);
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.account-page .account-intro {
+  margin: 0 0 1.5rem;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.account-page .account-session {
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  border-radius: var(--md-sys-shape-corner-medium);
+  background: var(--md-sys-color-surface-container-low);
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.account-page .account-form-fields {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+/* Disabled controls must not fade the security notice inside the fieldset. */
+.account-page .account-form-fields:disabled {
+  opacity: 1;
+}
+
+.account-page .account-field {
+  margin: 1.5rem 0;
+}
+
+.account-page .account-help {
+  margin: 0.5rem 0 0;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.account-page .account-privacy {
+  margin: 1.5rem 0;
+  padding: 1rem;
+  border: 0;
+  border-radius: var(--md-sys-shape-corner-large);
+  background: var(--md-sys-color-surface-container-low);
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 0.9375rem;
+  line-height: 1.8;
+}
+
+.account-page .account-privacy h2 {
+  margin: 0 0 0.75rem;
+  color: var(--md-sys-color-on-surface);
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.6;
+}
+
+.account-page .account-privacy ul {
+  margin: 0;
+  padding-inline-start: 1.25rem;
+}
+
+.account-page .account-privacy li + li {
+  margin-top: 0.75rem;
+}
+
+.account-page .account-privacy strong {
+  color: var(--md-sys-color-on-surface);
+}
+
+.account-page .account-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  min-height: var(--md-comp-minimum-touch-target-size);
+  margin: 1rem 0;
+  padding: 0.75rem;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-corner-medium);
+  color: var(--md-sys-color-on-surface);
+  font-size: 0.9375rem;
+  font-weight: 400;
+  line-height: 1.7;
+  cursor: pointer;
+}
+
+.account-page .account-consent input[type="checkbox"] {
+  flex-shrink: 0;
+  width: 1.25rem;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  min-height: 1.25rem;
+  margin: 0.2rem 0 0;
+  accent-color: var(--md-sys-color-primary);
+}
+
+.account-page .account-consent:has(input:checked) {
+  border-color: var(--md-sys-color-primary);
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+}
+
+.account-page .account-consent:has(input:enabled):hover {
+  border-color: var(--md-sys-color-primary);
+}
+
+.account-page .account-consent:has(input:disabled) {
+  cursor: not-allowed;
+}
+
+.account-page button,
+.account-page .account-link {
+  --account-button-container: transparent;
+  --account-button-label: var(--md-sys-color-primary);
+  --account-button-outline: var(--md-sys-color-outline);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  max-width: 100%;
+  width: auto;
+  min-height: var(--md-comp-minimum-touch-target-size);
+  margin: 0;
+  padding: 0.75rem 1.5rem;
+  border: 1px solid var(--account-button-outline);
+  border-radius: var(--md-sys-shape-corner-full);
+  background: var(--account-button-container);
+  color: var(--account-button-label);
+  font-family: inherit;
+  font-size: var(--md-sys-typescale-label-large-size);
+  font-weight: 500;
+  line-height: var(--md-sys-typescale-label-large-line-height);
+  letter-spacing: 0.1px;
+  text-align: center;
+  text-decoration: none;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.account-page .account-primary {
+  --account-button-container: var(--md-sys-color-primary);
+  --account-button-label: var(--md-sys-color-on-primary);
+  --account-button-outline: transparent;
+}
+
+.account-page .account-tonal {
+  --account-button-container: var(--md-sys-color-secondary-container);
+  --account-button-label: var(--md-sys-color-on-secondary-container);
+  --account-button-outline: transparent;
+}
+
+.account-page #register,
+.account-page #login {
+  width: 100%;
+}
+
+.account-page #register {
+  margin-top: 1rem;
+}
+
+.account-page button:disabled {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--md-sys-color-on-surface) 12%, transparent);
+  color: color-mix(in srgb, var(--md-sys-color-on-surface) 38%, transparent);
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.account-page .account-secondary:disabled,
+.account-page #passkeys button:disabled {
+  border-color: color-mix(in srgb, var(--md-sys-color-on-surface) 12%, transparent);
+  background: transparent;
+}
+
+.account-page .account-login {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--md-sys-color-outline-variant);
+  text-align: center;
+}
+
+.account-page .account-login p {
+  margin: 0 0 0.75rem;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 0.9375rem;
+}
+
+.account-page .account-status:not(:empty),
+.account-page .account-caution {
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid transparent;
+  border-radius: var(--md-sys-shape-corner-medium);
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+  font-size: 0.9375rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.account-page .account-status:empty {
+  display: none;
+}
+
+.account-page .account-status.is-error,
+.account-page .account-caution {
+  border-color: var(--md-sys-color-error);
+  background: var(--md-sys-color-error-container);
+  color: var(--md-sys-color-on-error-container);
+}
+
+.account-page .account-actions,
+.account-page .account-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1.5rem 0;
+}
+
+.account-page .account-actions > button {
+  flex: 0 1 auto;
+}
+
+.account-page .account-details {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--md-sys-color-outline-variant);
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 0.9375rem;
+}
+
+.account-page .account-details summary {
+  min-height: var(--md-comp-minimum-touch-target-size);
+  padding: 0.75rem 1rem;
+  border-radius: var(--md-sys-shape-corner-medium);
+  color: var(--md-sys-color-primary);
+  font-size: var(--md-sys-typescale-label-large-size);
+  font-weight: 500;
+  line-height: var(--md-sys-typescale-label-large-line-height);
+  cursor: pointer;
+}
+
+.account-page .account-details[open] > summary {
+  background: var(--md-sys-color-surface-container-low);
+}
+
+.account-page .account-details ul {
+  margin: 1rem 0 0;
+  padding-inline-start: 1.5rem;
+}
+
+.account-page .account-details li + li {
+  margin-top: 0.5rem;
+}
+
+.account-page #passkeys {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.account-page #passkeys:empty {
+  display: none;
+}
+
+.account-page #passkeys li {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  min-width: 0;
+  margin: 0;
+  padding: 1rem;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-corner-large);
+  background: var(--md-sys-color-surface-container-low);
+  color: var(--md-sys-color-on-surface);
+  overflow-wrap: anywhere;
+}
+
+.account-page #passkeys button {
+  align-self: flex-start;
+}
+
+.account-page #add-passkey {
+  margin-top: 1rem;
+}
+
+.account-page :is(button, .account-link, summary),
+.account-shell > a {
+  position: relative;
+  isolation: isolate;
+}
+
+.account-page :is(button, .account-link, summary)::after,
+.account-shell > a::after {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0;
+  content: "";
+  pointer-events: none;
+  transition: opacity var(--md-sys-motion-duration-short2) linear;
+}
+
+.account-page :is(button:enabled, .account-link, summary):hover::after,
+.account-shell > a:hover::after {
+  opacity: var(--md-sys-state-hover-state-layer-opacity);
+}
+
+.account-page :is(button:enabled, .account-link, summary):focus-visible::after,
+.account-shell > a:focus-visible::after {
+  opacity: var(--md-sys-state-focus-state-layer-opacity);
+}
+
+.account-page :is(button:enabled, .account-link, summary):active::after,
+.account-shell > a:active::after {
+  opacity: var(--md-sys-state-pressed-state-layer-opacity);
+}
+
+.account-page :is(a, button, input, summary):focus-visible,
+.account-shell > a:focus-visible {
+  outline: 3px solid var(--md-sys-color-primary);
+  outline-offset: 3px;
+}
+
+@media (max-width: 640px) {
+  .account-page .account-actions > button,
+  .account-page .account-links > .account-link {
+    flex-basis: 100%;
+    width: 100%;
+  }
+
+  .account-page #passkeys button,
+  .account-page #add-passkey {
+    align-self: stretch;
+    width: 100%;
+    padding-inline: 1rem;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .account-page .account-help,
+  .account-page .account-intro,
+  .account-page .account-session,
+  .account-page .account-privacy,
+  .account-page .account-details {
+    color: var(--md-sys-color-on-surface);
+  }
+
+  .account-page .account-consent,
+  .account-page #passkeys li {
+    border-color: var(--md-sys-color-outline);
+  }
+}
+
+@media (forced-colors: active) {
+  .account-page button,
+  .account-page .account-link {
+    border-color: ButtonText;
+    background: ButtonFace;
+    color: ButtonText;
+  }
+
+  .account-page button:disabled,
+  .account-page .account-secondary:disabled,
+  .account-page #passkeys button:disabled {
+    border-color: GrayText;
+    background: ButtonFace;
+    color: GrayText;
+  }
+
+  .account-page :is(a, button, input, summary):focus-visible,
+  .account-shell > a:focus-visible {
+    outline-color: Highlight;
+  }
+
+  .account-page :is(button, .account-link, summary)::after,
+  .account-shell > a::after {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .account-page :is(button, .account-link, summary)::after,
+  .account-shell > a::after {
+    transition: none;
+  }
+}

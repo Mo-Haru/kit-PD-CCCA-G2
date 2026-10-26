@@ -1,14 +1,21 @@
 {% extends "base.html" %}
 {% block title %}回答 | 意思の記録{% endblock %}
+{% block extra_head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/answers.css') }}">
+{% endblock %}
 {% block content %}
   <h1>回答</h1>
+  <p><a class="demo-launch" href="{{ url_for('answers.demo') }}">テスト用の回答画面を開く</a></p>
+  <p class="note">ダミー質問6問で、入力・暗号化保存・共有を試せます。ログイン後、テスト画面で鍵を解除してください。</p>
   <p><span class="badge">未実装</span></p>
   <p>回答の入力・保存・閲覧は、これからこの画面に追加します。まだ保存はできません。</p>
   <p>ブラウザ側での暗号化・復号も未実装です。サーバーが本文を読める形では受け取りません。</p>
   <fieldset disabled>
     <legend>回答の入力（未実装）</legend>
-    <label for="answer-body">回答</label>
-    <textarea id="answer-body" placeholder="入力できません"></textarea>
+    <div class="md-field md-field--raised">
+      <label class="md-field-label" for="answer-body">回答</label>
+      <textarea id="answer-body" class="md-field-control" placeholder="入力できません"></textarea>
+    </div>
     <button type="button">保存（未実装）</button>
   </fieldset>
   <p class="note">この操作は実行できません。</p>

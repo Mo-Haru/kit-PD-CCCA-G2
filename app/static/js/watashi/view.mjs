@@ -131,9 +131,9 @@ export async function loadQrPage({ api: call, storage, shareId, secrets }) {
   }
 }
 
-function showPayload(container, payload) {
+function showPayload(container, payload, catalog) {
   if (payload && payload.items && typeof payload.items === "object") {
-    fillAnswerList(container, entriesFromPayload(payload, null));
+    fillAnswerList(container, entriesFromPayload(payload, catalog));
     return;
   }
   container.replaceChildren();
@@ -166,7 +166,8 @@ function bindPage() {
   async function render(current, secrets) {
     showFacts(current);
     const opened = await openSharedPayload(secrets.privateKey, current, shareId);
-    showPayload(output, opened);
+    const catalog = await api("/api/v1/answers/questions").catch(() => null);
+    showPayload(output, opened, catalog);
     const absolute = current.session?.absolute_expires_at || "";
     show(`閲覧中です。絶対期限 ${absolute} は延長されません。`);
   }

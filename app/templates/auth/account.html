@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}アカウント | 意思の記録{% endblock %}
+{% block extra_head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/morishita.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/account.css') }}">
+{% endblock %}
+{% block content %}
+    <section id="account-settings" class="sensitive account-page account-settings" aria-labelledby="account-title" data-login-url="{{ url_for('auth.index', next=request.full_path if request.query_string else request.path) }}">
+      <p class="account-eyebrow">アカウント管理</p>
+      <h1 id="account-title">アカウント</h1>
+      <p id="session" class="account-session">ログイン状態を確認しています。</p>
+      <p id="status" class="account-status" role="status" aria-live="polite" aria-atomic="true"></p>
+
+
+      <div id="account-actions" hidden>
+        <div class="actions account-actions">
+          <button id="unlock" class="account-primary" type="button">鍵を解除</button>
+          <button id="logout" class="account-secondary" type="button">ログアウト</button>
+        </div>
+        <details class="account-details">
+          <summary>登録済みのパスキーを管理</summary>
+          <ul id="passkeys"></ul>
+          <button id="add-passkey" class="account-tonal" type="button">パスキーを追加</button>
+          <label class="account-consent" for="confirm-last">
+            <input id="confirm-last" type="checkbox">
+            <span>最後のパスキーを無効化すると、過去のデータを復号できなくなることを確認しました</span>
+          </label>
+        </details>
+        <div class="account-links">
+          <a class="account-link" href="{{ url_for('protection_pages.family') }}">家族共有</a>
+          <a class="account-link" href="{{ url_for('protection_pages.transfer') }}">端末移行</a>
+        </div>
+      </div>
+
+      <details class="account-details">
+        <summary>パスキーについて</summary>
+        <ul>
+          <li>パスキーをすべて失うと、保存した回答は復号できません。復旧用の秘密はサーバーに預かりません。</li>
+          <li>同期パスキーは、同じアカウントの他の端末でも使えることがあります。その端末からも解除できる場合があります。</li>
+          <li>PRFに対応したブラウザとパスキーが必要です。対応していない場合、登録は完了しません。</li>
+          <li>パスキーを無効化しても、同期先に残ったコピーや相手が保存した共有までは消せません。</li>
+        </ul>
+      </details>
+      <noscript><p class="account-caution">アカウントを管理するには、ブラウザのJavaScriptを有効にしてください。</p></noscript>
+    </section>
+  <script type="module" src="{{ url_for('static', filename='js/watashi/account.mjs') }}"></script>
+{% endblock %}

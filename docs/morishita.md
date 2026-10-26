@@ -6,12 +6,19 @@
 
 | 画面 | 役割 |
 | --- | --- |
-| `/auth` | パスキーの登録、ログイン、鍵の解除、追加、無効化 |
+| `/auth` | ヘッダーなしのログイン・新規登録。新規登録には画面上の注意事項への同意が必要 |
+| `/account` | ヘッダー付きのアカウント管理。鍵の解除、パスキーの追加・無効化、ログアウト |
+| `/answers/demo` | ダミー質問6問による暗号化保存・再読み込み・共有テスト |
+| `/sharing` | 共有する内容を確認してリンクを作成・停止する。QR画像は未実装 |
 | `/family` と `/family/invite` | 招待、承認、共有、切断 |
 | `/view/<共有ID>` | QRを読み取った人の閲覧。画像は出さない |
 | `/transfer` | 端末移行 |
 
-`/answers` と `/sharing` は未実装のままです。POSTすると 405 です。
+本実装の `/answers` は未実装のままです。保存・共有テストは `/answers/demo` から利用できます。画面のURLへPOSTすると405で、回答の保存や共有の作成には既存の暗号化APIを使います。
+
+共通ヘッダーのログインリンクは `/auth?next=<元ページのパスとクエリ>` を使います。ログイン・新規登録後はそのページへ戻り、`next` が未指定または不正ならホームへ戻ります。外部URLと `/auth` 自身への戻り先は受け付けません。招待トークンなどの元ページのfragmentは、ログインURLのfragmentでブラウザ内だけに引き継ぎ、`next` やサーバーへのリクエストへ混ぜません。ログインページでこのfragmentを取り出した後はアドレスバーから消します。ページ移動後の鍵は未解除なので、共有等の操作には移動先で通常どおり解錠してください。
+
+登録前の同意はフロント側だけで判定し、サーバーの同意記録やAPI契約は追加していません。暗号化対象は回答として記録する個人情報・回答本文です。公開用の表示名は暗号化されず、ログイン・共有管理の情報もサーバーで管理します。「すべての個人情報が暗号化される」「元の端末以外では復号できない」とは表示しません。同期パスキーを使える別端末や共有先でも、それぞれの権限・鍵で閲覧できる場合があります。すべての利用可能なパスキーを失ったとき、運営が本人の記録を復元する機能はありません。
 
 ## 他の担当が使うJavaScript
 
@@ -25,7 +32,7 @@
 - `createFamilyShare({ connectionId, recipientUserId, recipientKeyId, selection, expiresAt })`
 - `updateFamilyShare({ shareId, expectedVersion, recipientUserId, recipientKeyId, selection })`
 - `openReceivedShare(share)` / `openOwnerCopy(share)`
-- `createQrShare({ mode, expiresAt, selection })` は `{ share, url, privateKey, startToken }` を返す。`url` の秘密は fragment だけに入る
+- `createQrShare({ mode, expiresAt, selection, payload = null })` は `{ share, url, privateKey, startToken }` を返す。`payload` を渡すと確認済みの内容をそのまま暗号化する。`url` の秘密は fragment だけに入る
 - `updateQrShare({ shareId, expectedVersion, publicKey, selection })`
 - `confirmMigrationAccess(migrationId)` は、新しいパスキーで解錠してから既存データと受信共有を復号し、成功したときだけ確認APIを呼ぶ
 - `getUnlockState()` はログインと、このページのメモリ上で鍵が解けているかを分ける

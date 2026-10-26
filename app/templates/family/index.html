@@ -29,10 +29,15 @@
     <div id="chapters"></div>
     <div id="questions"></div>
     <h2>共有を作る</h2>
-    <label for="connection">相手</label>
-    <select id="connection"></select>
-    <label for="expires-at">期限（空欄なら期限なし）</label>
-    <input id="expires-at" type="datetime-local">
+    <div class="md-field md-field--raised">
+      <label class="md-field-label" for="connection">相手</label>
+      <select id="connection" class="md-field-control"></select>
+    </div>
+    <div class="md-field md-field--raised">
+      <label class="md-field-label" for="expires-at">期限</label>
+      <input id="expires-at" class="md-field-control" type="datetime-local" aria-describedby="expires-at-help">
+      <p id="expires-at-help" class="md-field-help">空欄なら期限なし。</p>
+    </div>
     <button id="show-preview" type="button">共有する内容を確認</button>
     <div id="preview-output"></div>
     <label><input id="confirm-share" type="checkbox"> 上に出た相手、期限、鍵、項目だけを共有することを確認しました</label>

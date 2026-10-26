@@ -38,7 +38,7 @@ class BaseConfig:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     WEBAUTHN_RP_ID = env_or("WEBAUTHN_RP_ID", "localhost")
     WEBAUTHN_RP_NAME = env_or("WEBAUTHN_RP_NAME", "意思の記録")
-    WEBAUTHN_ORIGIN = env_or("WEBAUTHN_ORIGIN", "http://localhost:5000")
+    WEBAUTHN_ORIGIN = env_or("WEBAUTHN_ORIGIN", "http://localhost:5001")
     COOKIE_SECURE = False
     SESSION_TTL_SECONDS = 12 * 60 * 60
     REAUTH_TTL_SECONDS = 15 * 60
@@ -63,10 +63,12 @@ class BaseConfig:
 
 class DevelopmentConfig(BaseConfig):
     DEBUG = True
+    DEMO_QUESTIONS_ENABLED = True
 
 
 class TestingConfig(BaseConfig):
     TESTING = True
+    DEMO_QUESTIONS_ENABLED = True
     SECRET_KEY = "test-only"
     CONTACT_HASH_KEY = "test-only-contact-hash-key-32b!!"
     WEBAUTHN_ORIGIN = "http://localhost"

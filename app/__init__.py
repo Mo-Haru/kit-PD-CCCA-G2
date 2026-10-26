@@ -18,7 +18,7 @@ CSP = (
     "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
     "connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
 )
-SENSITIVE_PREFIXES = ("/auth", "/family", "/transfer", "/view", "/api/")
+SENSITIVE_PREFIXES = ("/auth", "/account", "/answers/demo", "/sharing", "/family", "/transfer", "/view", "/api/")
 CSRF_EXEMPT = {
     "protection_api.register_options",
     "protection_api.login_options",
@@ -65,7 +65,10 @@ def register_blueprints(app):
 
 
 def register_commands(app):
+    from app.demo_answers import seed_answer_demo_command
+
     app.cli.add_command(init_db_command)
+    app.cli.add_command(seed_answer_demo_command)
 
 
 def register_error_handlers(app):

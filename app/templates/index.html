@@ -16,13 +16,14 @@
       <li>
         <h3><a href="{{ url_for('answers.index') }}">回答</a></h3>
         <p>入力・保存・閲覧。ブラウザ側の暗号化も含みます。<span class="badge">未実装</span></p>
+        <p><a href="{{ url_for('answers.demo') }}">テスト用の回答画面</a></p>
       </li>
       <li>
         <h3><a href="{{ url_for('sharing.index') }}">共有</a></h3>
         <p>共有の有効・無効、期限、QRコード。<span class="badge">未実装</span></p>
       </li>
       <li>
-        <h3><a href="{{ url_for('auth.index') }}">認証</a></h3>
+        <h3><a href="{{ url_for('auth.index', next=request.full_path if request.query_string else request.path) }}" data-auth-link>認証</a></h3>
         <p>パスキーの登録、ログイン、鍵の解除。</p>
       </li>
       <li>

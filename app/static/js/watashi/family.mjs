@@ -277,7 +277,16 @@ async function refresh() {
     }));
     const expiry = document.createElement("input");
     expiry.type = "datetime-local";
-    item.append(expiry, button("期限を変更", async () => {
+    expiry.id = `share-expiry-${share.id}`;
+    expiry.className = "md-field-control";
+    const expiryField = document.createElement("div");
+    expiryField.className = "md-field md-field--raised";
+    const expiryLabel = document.createElement("label");
+    expiryLabel.className = "md-field-label";
+    expiryLabel.htmlFor = expiry.id;
+    expiryLabel.textContent = "変更後の期限";
+    expiryField.append(expiryLabel, expiry);
+    item.append(expiryField, button("期限を変更", async () => {
       try {
         await api(`/api/v1/family/shares/${share.id}/expiry`, {
           method: "POST",

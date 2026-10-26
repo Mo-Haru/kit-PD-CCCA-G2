@@ -1,20 +1,64 @@
-import { addPasskey, api, detectPrf, getUnlockState, login, logout, registerAccount, unlock } from "./client.mjs";
+import { addPasskey, api, getUnlockState, logout, unlock } from "./client.mjs";
 
 const status = document.querySelector("#status");
 const list = document.querySelector("#passkeys");
+const loginUrl = document.querySelector("#account-settings").dataset.loginUrl;
+let busy = false;
+let sessionKnown = false;
+let authenticated = false;
 
-function show(text) {
+function show(text, isError = false) {
   status.textContent = text;
+  status.classList.toggle("is-error", isError);
+}
+
+function syncControls() {
+  for (const button of document.querySelectorAll("#account-settings button")) {
+    button.disabled = busy || !sessionKnown || !authenticated;
+  }
+}
+
+async function runAction(button, pending, action, success) {
+  if (busy || !sessionKnown) return;
+  busy = true;
+  const label = button.textContent;
+  button.textContent = pending;
+  syncControls();
+  show(pending);
+  let completed = false;
+  try {
+    await action();
+    completed = true;
+    await refresh();
+    show(success);
+  } catch (error) {
+    const message = error.name === "NotAllowedError" || error.name === "AbortError"
+      ? "パスキーの操作が完了しませんでした。端末の案内を確認し、もう一度お試しください。"
+      : error.message || "操作できませんでした。もう一度お試しください。";
+    show(completed ? `${success} 表示を更新できませんでした。ページを再読み込みしてください。` : message, true);
+  } finally {
+    busy = false;
+    button.textContent = label;
+    syncControls();
+  }
 }
 
 async function refresh() {
+  sessionKnown = false;
+  syncControls();
   const session = await api("/api/v1/auth/session");
+  authenticated = session.authenticated;
+  sessionKnown = true;
+  document.querySelector("#account-actions").hidden = !authenticated;
   const unlocked = getUnlockState().unlocked;
-  document.querySelector("#session").textContent = session.authenticated
+  const sessionLabel = document.querySelector("#session");
+  sessionLabel.textContent = authenticated
     ? `${session.display_name} としてログイン中です。鍵の解除: ${unlocked ? "済み" : "未"}。再認証: ${session.reauthenticated ? "有効" : "必要"}。`
-    : "ログインしていません。";
-  if (!session.authenticated) {
+    : "ログインが必要です。ログイン画面へ移動します。";
+  syncControls();
+  if (!authenticated) {
     list.replaceChildren();
+    location.replace(loginUrl);
     return;
   }
   const passkeys = await api("/api/v1/auth/passkeys");
@@ -50,61 +94,20 @@ async function refresh() {
     }
     list.append(item);
   }
+  syncControls();
 }
 
-document.querySelector("#register").addEventListener("click", async () => {
-  const prf = await detectPrf();
-  if (!prf.supported) {
-    show(prf.reason);
-    return;
-  }
-  try {
-    await registerAccount(document.querySelector("#display-name").value);
-    show("パスキーを登録し、この端末で鍵を解除しました。");
-    await refresh();
-  } catch (error) {
-    show(error.message || "登録できませんでした。");
-  }
+
+document.querySelector("#unlock").addEventListener("click", (event) => {
+  runAction(event.currentTarget, "鍵を解除しています…", unlock, "鍵を解除しました。PRFの出力はサーバーへ送っていません。");
 });
 
-document.querySelector("#login").addEventListener("click", async () => {
-  try {
-    await login();
-    show("ログインしました。回答を読むには鍵の解除が必要です。");
-    await refresh();
-  } catch (error) {
-    show(error.message || "ログインできませんでした。");
-  }
+document.querySelector("#logout").addEventListener("click", (event) => {
+  runAction(event.currentTarget, "ログアウトしています…", logout, "ログアウトしました。");
 });
 
-document.querySelector("#unlock").addEventListener("click", async () => {
-  try {
-    await unlock();
-    show("鍵を解除しました。PRFの出力はサーバーへ送っていません。");
-    await refresh();
-  } catch (error) {
-    show(error.message || "解除できませんでした。");
-  }
+document.querySelector("#add-passkey").addEventListener("click", (event) => {
+  runAction(event.currentTarget, "パスキーを追加しています…", addPasskey, "パスキーを追加しました。以前のパスキーも有効なままです。");
 });
 
-document.querySelector("#logout").addEventListener("click", async () => {
-  try {
-    await logout();
-    show("ログアウトしました。");
-    await refresh();
-  } catch (error) {
-    show(error.message);
-  }
-});
-
-document.querySelector("#add-passkey").addEventListener("click", async () => {
-  try {
-    await addPasskey();
-    show("パスキーを追加しました。以前のパスキーも有効なままです。");
-    await refresh();
-  } catch (error) {
-    show(error.message || "パスキーを追加できませんでした。");
-  }
-});
-
-refresh().catch((error) => show(error.message));
+refresh().catch(() => show("ログイン状態を確認できませんでした。接続を確認して、ページを再読み込みしてください。", true));

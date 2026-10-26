@@ -572,13 +572,13 @@ async function selectedPayload(selection) {
   return plaintextForSelection(loaded.document, catalog, selection);
 }
 
-export async function createQrShare({ mode, expiresAt = null, selection }) {
+export async function createQrShare({ mode, expiresAt = null, selection, payload: confirmedPayload = null }) {
   if (!vault.storageKey || !vault.userId) throw new Error("先にパスキーで鍵を解除してください。");
   const pair = await generateHpkeKeyPair();
   const shareId = randomShareId();
   const startToken = randomBytes(32);
   const tokenHash = new Uint8Array(await crypto.subtle.digest("SHA-256", startToken));
-  const payload = await selectedPayload(selection);
+  const payload = await sharePlaintext(selection, confirmedPayload);
   const aad = hpkeAad({
     purpose: "qr",
     contextId: shareId,

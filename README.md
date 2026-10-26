@@ -149,13 +149,18 @@ pytest は Node.js も使います。`tests/browser_crypto.mjs` と `tests/page_
 | http://localhost:5000/ | 「意思の記録」と、回答・共有・認証・家族・移行へのリンクが見える |
 | http://localhost:5000/hello | 本文が `Hello, World!` |
 | http://localhost:5000/answers | 回答入力は「未実装」。保存APIは別で、`docs/morishita.md` の契約を使う |
-| http://localhost:5000/sharing | QR画像は「未実装」。閲覧開始APIは別 |
+| http://localhost:5000/answers/demo | ダミー質問6問。パスキーで解錠し、暗号化保存・再読み込み・共有を試せる |
+| http://localhost:5000/sharing | 共有範囲を確認してリンクを作成・停止できる。QR画像は未実装 |
 | http://localhost:5000/auth | パスキーの登録、ログイン、鍵の解除ができる |
 | http://localhost:5000/family | この画面でログインし、鍵を解除してから家族共有を作れる |
 | http://localhost:5000/transfer | この画面でログインし、鍵を解除してから端末移行を進められる |
 | http://localhost:5000/health | JSON で `status` と `database` がどちらも `ok` |
 
 `/hello` は、以前の単一ファイルのアプリが返していた確認用の応答です。HTML の画面ではなく、本文 `Hello, World!` をそのまま返します。
+
+`/answers/demo` は、本実装の `/answers` とは別の保存・共有テスト画面です。質問とサンプル回答は `app/data/answer-demo.json` にあります。初回は `init-db` のあとに `py -3.14 -m pipenv run python -m flask --app run seed-answer-demo` でテスト質問6問をDBへ追加します。このコマンドは繰り返しても重複せず、既存の質問・回答・アカウントは置き換えません。
+
+画面でログインし、その画面で鍵を解除してから、サンプル入力 → 回答確認 → 「暗号化してDBに保存」を押します。保存APIへは暗号文だけを送り、テスト質問以外の既存回答は保持します。再読み込み後も鍵を解除すれば保存内容を表示できます。共有画面では質問・章・全体の範囲を確認し、緊急用または期限付きのリンクを作れます。家族共有は `/family` を使います。手順と検証範囲は [回答・共有のテスト手順](docs/answer-demo.md) にあります。
 
 画面上部には、回答の入力画面とQRコードの画像表示が未実装であり、パスキー、家族共有、QRの閲覧、端末移行は使える旨が出ます。未実装のボタンは押せません。
 
