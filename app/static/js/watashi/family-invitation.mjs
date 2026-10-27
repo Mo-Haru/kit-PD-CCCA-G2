@@ -62,7 +62,10 @@ export async function bindFamilyInvitation(root, call = api, address = location,
       node("invite-confirmation").hidden = true;
       show("招待を承諾しました。招待した方の確認をお待ちください。");
     } catch (error) { if (tokenStillMatches()) show(error.message || "招待を承諾できませんでした。"); }
-    finally { busy = false; accept.disabled = !tokenStillMatches() || accepted || !authenticated; }
+    finally {
+      busy = false;
+      accept.disabled = accepted || !authenticated || !tokenStillMatches();
+    }
   });
   try { const state = await session(); if (state) accountId = state.user_id; }
   catch (_error) { if (tokenStillMatches()) show("ログイン状態を確認できません。ページを開き直してください。"); }

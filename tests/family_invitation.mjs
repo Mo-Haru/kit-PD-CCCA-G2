@@ -20,7 +20,18 @@ function page() {
 const token = "a".repeat(43);
 const address = { origin: "http://localhost", pathname: "/family/invite", hash: `#token=${token}` };
 const navigations = [];
-const history = { replaceState(_state, _title, path) { navigations.push(path); } };
+function navigationFor(target, paths = navigations) {
+  return {
+    replaceState(_state, _title, path) {
+      paths.push(path);
+      const next = new URL(path, target.origin);
+      target.pathname = next.pathname;
+      target.hash = next.hash;
+      // Like the browser History API, replaceState does not emit hashchange.
+    },
+  };
+}
+const history = navigationFor(address);
 let account = { authenticated: false };
 let posts = [];
 async function api(path, options = {}) {
@@ -44,7 +55,8 @@ assert.equal(guest.nodes["accept-invitation"].disabled, true);
 // Returning from login presents confirmation and never auto-accepts.
 account = { authenticated: true, user_id: "person-a", display_name: "サンプルA" };
 const loggedIn = page();
-await bindFamilyInvitation(loggedIn, api, address, history);
+const loggedInAddress = { ...address };
+await bindFamilyInvitation(loggedIn, api, loggedInAddress, navigationFor(loggedInAddress));
 assert.ok(loggedIn.nodes["invite-session"].textContent.includes("サンプルA でログイン中"));
 assert.equal(loggedIn.nodes["invite-confirmation"].hidden, false);
 assert.equal(posts.length, 0);
@@ -56,8 +68,14 @@ await loggedIn.nodes["accept-invitation"].fire("click");
 assert.deepEqual(posts, [{ token }]);
 assert.equal(loggedIn.nodes["invite-confirmation"].hidden, true);
 assert.equal(navigations.at(-1), "/family/invite");
+assert.equal(loggedInAddress.hash, "");
+const successMessage = "招待を承諾しました。招待した方の確認をお待ちください。";
+assert.equal(loggedIn.nodes["invite-status"].textContent, successMessage);
+assert.equal(loggedIn.nodes["invite-session"].textContent, "サンプルB でログイン中");
+assert.equal(loggedIn.nodes["accept-invitation"].disabled, true);
 await loggedIn.nodes["accept-invitation"].fire("click");
 assert.equal(posts.length, 1);
+assert.equal(loggedIn.nodes["invite-status"].textContent, successMessage);
 const invalid = page();
 await bindFamilyInvitation(invalid, () => { throw new Error("Invalid links must not call APIs"); }, { ...address, hash: "" }, history);
 assert.ok(invalid.nodes["invite-session"].textContent.includes("確認できません"));
@@ -66,7 +84,7 @@ const otherToken = "b".repeat(43);
 for (const dispatch of [true, false]) {
   const changed = page();
   const changedAddress = { ...address };
-  await bindFamilyInvitation(changed, api, changedAddress, history);
+  await bindFamilyInvitation(changed, api, changedAddress, navigationFor(changedAddress));
   const before = posts.length;
   changedAddress.hash = `#token=${otherToken}`;
   if (dispatch) changed.defaultView.dispatch("hashchange");
@@ -105,9 +123,7 @@ for (const phase of ["initial-session", "accept-session", "accept-post"]) {
       reached();
       return pending;
     }
-    const binding = bindFamilyInvitation(changed, delayedApi, changedAddress, {
-      replaceState(_state, _title, path) { replaced.push(path); },
-    });
+    const binding = bindFamilyInvitation(changed, delayedApi, changedAddress, navigationFor(changedAddress, replaced));
     let acceptance;
     if (phase !== "initial-session") {
       await binding;
