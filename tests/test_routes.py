@@ -148,6 +148,14 @@ def test_sharing_preview_confirmation_failure_and_stop():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_qr_view_ignores_late_results_after_ending():
+    result = subprocess.run(
+        ["node", "tests/view_page.mjs"], cwd=Path(__file__).resolve().parents[1],
+        capture_output=True, text=True, timeout=20, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_family_has_dedicated_invitation_and_shared_answer_dialog(client):
     from tests.test_menu import StrictMarkup
 

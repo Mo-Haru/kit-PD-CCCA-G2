@@ -38,7 +38,7 @@ class BaseConfig:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     WEBAUTHN_RP_ID = env_or("WEBAUTHN_RP_ID", "localhost")
     WEBAUTHN_RP_NAME = env_or("WEBAUTHN_RP_NAME", "意思の記録")
-    WEBAUTHN_ORIGIN = env_or("WEBAUTHN_ORIGIN", "http://localhost:5001")
+    WEBAUTHN_ORIGIN = env_or("WEBAUTHN_ORIGIN", "http://localhost:5000")
     COOKIE_SECURE = False
     SESSION_TTL_SECONDS = 12 * 60 * 60
     REAUTH_TTL_SECONDS = 15 * 60
