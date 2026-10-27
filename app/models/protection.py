@@ -233,9 +233,9 @@ class FamilyShareOwnerCopy(IdentityMixin, CreatedMixin, Model):
 class QrShare(CreatedMixin, UpdatedMixin, Model):
     __tablename__ = "qr_shares"
     __table_args__ = (
-        CheckConstraint("mode IN ('emergency', 'timed')", name="mode"),
+        CheckConstraint("mode IN ('emergency', 'timed', 'unlimited')", name="mode"),
         CheckConstraint(
-            "(mode = 'emergency' AND expires_at IS NULL) OR (mode = 'timed' AND expires_at IS NOT NULL AND expires_at > created_at)",
+            "(mode IN ('emergency', 'unlimited') AND expires_at IS NULL) OR (mode = 'timed' AND expires_at IS NOT NULL AND expires_at > created_at)",
             name="mode_expiry",
         ),
         CheckConstraint("length(public_key) = 32", name="public_key_length"),

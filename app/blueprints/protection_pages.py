@@ -12,7 +12,7 @@ def family():
 
 @bp.get("/family/invite", strict_slashes=False)
 def family_invite():
-    return render_template("family/index.html")
+    return render_template("family/invite.html")
 
 
 @bp.get("/transfer", strict_slashes=False)

@@ -10,7 +10,8 @@
 | `/account` | ヘッダー付きのアカウント管理。鍵の解除、パスキーの追加・無効化、ログアウト |
 | `/answers/demo` | ダミー質問6問による暗号化保存・再読み込み・共有テスト |
 | `/sharing` | 共有する内容を確認してリンクを作成・停止する。QR画像は未実装 |
-| `/family` と `/family/invite` | 招待、承認、共有、切断 |
+| `/family` | 家族一覧、リンク・QR招待、承認、共有、登録解除。送信・受信内容はモーダルで表示 |
+| `/family/invite` | ログイン中の名前を確認して招待を承諾する専用画面 |
 | `/view/<共有ID>` | QRを読み取った人の閲覧。画像は出さない |
 | `/transfer` | 端末移行 |
 
@@ -32,6 +33,7 @@
 - `createFamilyShare({ connectionId, recipientUserId, recipientKeyId, selection, expiresAt })`
 - `updateFamilyShare({ shareId, expectedVersion, recipientUserId, recipientKeyId, selection })`
 - `openReceivedShare(share)` / `openOwnerCopy(share)`
+- `openOwnedQrShare(share)` は、発行者用の暗号化された控えで、リンクに含めた回答を復号する。現在の回答で代用しない
 - `createQrShare({ mode, expiresAt, selection, payload = null })` は `{ share, url, privateKey, startToken }` を返す。`payload` を渡すと確認済みの内容をそのまま暗号化する。`url` の秘密は fragment だけに入る
 - `updateQrShare({ shareId, expectedVersion, publicKey, selection })`
 - `confirmMigrationAccess(migrationId)` は、新しいパスキーで解錠してから既存データと受信共有を復号し、成功したときだけ確認APIを呼ぶ
@@ -61,6 +63,7 @@
 | パスキーで包む保管用鍵 | `acp/passkey-wrap/v1` | `acp/passkey-wrap/v1\|{user_handle}\|{credential_id}\|{data_key_id}` |
 | 鍵束 | `acp/key-bundle/v1\|{data_key_id}` | `acp/key-bundle/v1\|{data_key_id}\|{revision}` |
 | 共有の所有者用控え | `acp/share-owner-copy/v1\|{share_id}\|{version}` | 同じ文字列 |
+| QRの発行者用控え | `acp/qr-owner-secret/v1\|{data_key_id}\|{share_id}` | 同じ文字列 |
 | HPKE | AADと同じバイト列を info にも使う | `hpke-v1\|{purpose}\|{context_id}\|{owner_id}\|{recipient_id}\|{key_id}\|{version}` |
 
 HKDFのsaltは、パスキーの包みでは封筒の `kdf_salt`、それ以外のAESでは32バイトのゼロです。PRFの評価入力はパスキーごとにサーバーが作った32バイトで、出力そのものは送りません。`clientExtensionResults` を含む認証応答は拒否します。
@@ -141,7 +144,7 @@ try {
 
 1. 32バイトのHPKE鍵対と、32バイトの開始トークンを端末で作ります。
 2. 共有IDは32バイトのbase64url（43文字）です。AADに入れるため、作成前に決めます。
-3. `POST /api/v1/qr-shares` に `id`、`mode`（`emergency` または `timed`）、`public_key`、`start_token_hash`（SHA-256）、`version`（`hpke_enc` と `ciphertext`）、期限付きなら `expires_at` を送ります。`private_key` や完全なURLは項目として拒否します。
+3. `POST /api/v1/qr-shares` に `id`、`mode`（`emergency`、`timed`、`unlimited`）、`public_key`、`start_token_hash`（SHA-256）、`version`（`hpke_enc` と `ciphertext`）、期限付きなら `expires_at` を送ります。`unlimited` は期限なし・複数回で、停止操作は共通です。`private_key` や完全なURLは項目として拒否します。発行者向けの `owner_secret` は暗号文のみを保存し、所有者の一覧・詳細APIだけに返します。閲覧APIには返しません。
 4. 表示するURLは `createShareUrl` の形です。`/view/<id>#k=<秘密鍵>&t=<開始トークン>`。
 5. 坂の表示UIは、`createQrShare` が返した `url` だけを画像にします。`privateKey` と `startToken` はサーバーへ送らず、画像の元データにも残しません。`selection` を省くと全体共有にはならず、関数が失敗します。共有前に `plaintextForSelection` で対象だけを確認できます。
 6. 閲覧ページはfragmentを `sessionStorage` に移し、アドレスバーからは消します。初回表示では開始しません。利用者が「内容を開く」を押したときだけ `POST /api/v1/qr-shares/<id>/start` に `start_token` と `attempt_id` を送ります。秘密鍵は送りません。

@@ -150,6 +150,10 @@ try {
   const clock = await rpc("clock", { advance: 0 });
   const expiresAt = new Date(Date.parse(clock.now) + 60000).toISOString();
   const created = await a.createQrShare({ mode: "timed", selection, expiresAt, payload: confirmed });
+  privateMarkers.push(bytesToB64url(created.privateKey));
+  const ownerView = await a.api(`/api/v1/qr-shares/${created.share.id}`);
+  assert.ok(ownerView.share.owner_secret);
+  assert.deepEqual(await a.openOwnedQrShare(ownerView.share), confirmed);
   const secrets = parseShareFragment(new URL(created.url).hash);
   const { resumeOrStartQr, openSharedPayload } = await import("../app/static/js/watashi/view.mjs");
   const viewer = use("viewer");
@@ -157,6 +161,7 @@ try {
   const viewed = await resumeOrStartQr({ api: viewer.api, shareId: created.share.id,
     secrets: { ...secrets, attempt: bytesToB64url(crypto.getRandomValues(new Uint8Array(32))) }, resumeOnly: false });
   const opened = await openSharedPayload(secrets.privateKey, viewed.current, created.share.id);
+  assert.ok(!Object.hasOwn(viewed.current, "owner_secret"));
   assert.deepEqual(opened, confirmed);
   assert.equal(entriesFromPayload(opened, catalog)[0].label, fixture.questions[0].text);
   use("A");
@@ -180,6 +185,28 @@ try {
     start_token: bytesToB64url(shortSecrets.startToken), attempt_id: bytesToB64url(crypto.getRandomValues(new Uint8Array(32))),
   } }), error => error.code === "qr_expired");
 
+  stage = "unlimited link / two viewers / a year later / owner decryption / stop";
+  use("A");
+  const unlimited = await a.createQrShare({ mode: "unlimited", selection, payload: confirmed });
+  const unlimitedSecrets = parseShareFragment(new URL(unlimited.url).hash);
+  privateMarkers.push(bytesToB64url(unlimited.privateKey));
+  assert.equal(unlimited.share.expires_at, null);
+  await rpc("clock", { advance: 366 * 86400 });
+  for (const actorName of ["viewer", "other-viewer"]) {
+    const receiver = use(actorName);
+    await receiver.api(`/api/v1/qr-shares/${unlimited.share.id}/start`, { method: "POST", body: {
+      start_token: bytesToB64url(unlimitedSecrets.startToken), attempt_id: bytesToB64url(crypto.getRandomValues(new Uint8Array(32))),
+    } });
+    const current = await receiver.api("/api/v1/qr-view/current");
+    assert.equal(current.mode, "unlimited");
+    assert.ok(!Object.hasOwn(current, "owner_secret"));
+    assert.deepEqual(await openSharedPayload(unlimitedSecrets.privateKey, current, unlimited.share.id), confirmed);
+  }
+  use("A");
+  assert.deepEqual(await a.openOwnedQrShare((await a.api(`/api/v1/qr-shares/${unlimited.share.id}`)).share), confirmed);
+  await a.api(`/api/v1/qr-shares/${unlimited.share.id}/stop`, { method: "POST", body: {} });
+  await assert.rejects(use("other-viewer").api("/api/v1/qr-view/current"), error => error.code === "qr_stopped");
+
   stage = "database and HTTP plaintext / key checks";
   const evidence = await rpc("evidence");
   const markers = [...Object.values(edited).flatMap(item => Array.isArray(item.value) ? item.value : [item.value]),
@@ -188,7 +215,7 @@ try {
   for (const marker of markers) assert.ok(!serialized.includes(marker), "Plaintext or key leaked to the server");
   assert.equal(evidence.counts.private_answer_documents, 5);
   assert.equal(evidence.counts.family_share_versions, 4);
-  assert.equal(evidence.counts.qr_share_versions, 3);
+  assert.equal(evidence.counts.qr_share_versions, 4);
   process.stdout.write(JSON.stringify({ kind: "done", counts: evidence.counts }) + "\n");
 } catch (error) {
   process.stdout.write(JSON.stringify({ kind: "failed", stage, error: error.code || error.name }) + "\n");

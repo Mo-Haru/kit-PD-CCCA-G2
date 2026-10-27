@@ -735,11 +735,30 @@ button {
   border: 1px solid var(--md-sys-color-outline);
   background: transparent;
   color: var(--md-sys-color-primary);
+  cursor: pointer;
 }
 
 button:disabled,
 fieldset:disabled button {
   cursor: not-allowed;
+}
+
+button:disabled,
+.sensitive button:disabled:not([data-unlock-state="unlocked"]) {
+  background: var(--md-sys-color-surface-container-high);
+  border-color: var(--md-sys-color-outline-variant);
+  color: var(--md-sys-color-outline);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+@media (forced-colors: active) {
+  button:disabled,
+  .sensitive button:disabled:not([data-unlock-state="unlocked"]) {
+    background: Canvas;
+    border-color: GrayText;
+    color: GrayText;
+  }
 }
 
 .note {

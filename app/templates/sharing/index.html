@@ -9,15 +9,17 @@
     <h1 id="sharing-title">共有リンクで試す</h1>
     <p class="page-intro">保存した回答のうち、選んだ範囲だけを共有します。回答を後から保存しても、発行済みの共有内容は自動では変わりません。</p>
     <p class="demo-notice">QR画像の生成は未実装です。ここでは共有リンクを使って、閲覧・有効期限・停止をテストできます。リンクを知っている人は内容を閲覧できます。</p>
-    <p id="lock-state">ログイン状態を確認しています。</p>
+    <p id="lock-state" role="status" aria-live="polite">ログイン状態を確認しています。</p>
     <p id="status" class="status-message" role="status" aria-live="polite"></p>
     <div class="actions">
       <a id="login-here" class="demo-launch" href="{{ url_for('auth.index', next=url_for('sharing.index')) }}">ログイン・新規登録</a>
-      <button id="unlock-here" type="button" hidden>この画面で鍵を解除</button>
+      <button id="unlock-here" class="sharing-unlock" type="button" data-unlock-state="locked" aria-describedby="sharing-unlock-help" hidden>回答の暗号化を解除</button>
     </div>
+    <p id="sharing-unlock-help" class="note">範囲は先に選べます。赤いボタンで回答の暗号化を解除すると、回答内容を確認して共有できます。</p>
     <fieldset id="share-fields" class="demo-fields" disabled>
       <legend class="demo-form-legend">共有内容の設定</legend>
       <h2>共有する範囲</h2>
+      <p class="note">解除前の文字列は、回答全体を暗号化して保存したデータの一部です。</p>
       <fieldset class="scope-options">
         <legend>範囲</legend>
         <label><input type="radio" name="scope" value="all"> 全体</label>
@@ -26,16 +28,18 @@
       </fieldset>
       <fieldset id="chapters" class="choice-list" hidden><legend>共有する章</legend></fieldset>
       <fieldset id="questions" class="choice-list"><legend>共有する質問</legend></fieldset>
+      <section id="all-answers" hidden aria-label="共有対象の全回答"></section>
       <fieldset class="scope-options">
         <legend>リンクの種類</legend>
         <label><input type="radio" name="mode" value="emergency" checked> 緊急用（最初の閲覧のみ）</label>
         <label><input type="radio" name="mode" value="timed"> 期限付き（最長31日、期限まで複数回閲覧可）</label>
+        <label><input type="radio" name="mode" value="unlimited"> 無期限・複数回（停止するまで閲覧可）</label>
       </fieldset>
       <div id="expiry-field" class="md-field md-field--raised" hidden>
         <label class="md-field-label" for="expires-at">有効期限</label>
         <input id="expires-at" class="md-field-control" type="datetime-local" disabled>
       </div>
-      <button id="show-preview" type="button">共有する内容を確認</button>
+      <button id="show-preview" type="button" disabled>共有する内容を確認</button>
       <div id="preview-output" class="review-output"></div>
       <label class="confirmation"><input id="confirm-share" type="checkbox" disabled> 表示された内容と期限で共有リンクを作成します</label>
       <button id="create-qr" class="button-primary" type="button" disabled>共有リンクを作る</button>
@@ -57,6 +61,29 @@
     <ul id="qr-shares" class="record-list"></ul>
     <p class="note">停止後も、閲覧した相手が既に保存した内容は消せません。</p>
     <p><a href="{{ url_for('protection_pages.family') }}">アカウント同士の家族共有を試す</a></p>
+    <dialog id="share-detail" class="share-dialog" aria-labelledby="share-detail-title">
+      <div class="share-dialog-shell">
+        <div class="share-dialog-header">
+          <div class="share-dialog-heading">
+            <h2 id="share-detail-title">共有内容</h2>
+            <button id="share-close-top" type="button">閉じる</button>
+          </div>
+          <button id="share-stop-top" class="button-danger" type="button" disabled>共有停止</button>
+        </div>
+        <div class="share-dialog-body">
+          <p id="share-detail-status" role="status" aria-live="polite"></p>
+          <p id="share-detail-facts" class="note"></p>
+          <button id="share-detail-unlock" class="sharing-unlock" type="button" data-unlock-state="locked" hidden>回答の暗号化を解除</button>
+          <p class="note">発行時点の共有内容です。後から保存した回答は自動反映されません。</p>
+          <code id="share-detail-cipher" class="share-cipher" hidden></code>
+          <div id="share-detail-answers"></div>
+        </div>
+        <div class="share-dialog-footer actions">
+          <button id="share-stop-bottom" class="button-danger" type="button" disabled>共有停止</button>
+          <button id="share-close-bottom" type="button">閉じる</button>
+        </div>
+      </div>
+    </dialog>
   </section>
   <script type="module" src="{{ url_for('static', filename='js/watashi/sharing.mjs') }}"></script>
 {% endblock %}

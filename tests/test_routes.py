@@ -148,6 +148,31 @@ def test_sharing_preview_confirmation_failure_and_stop():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_family_has_dedicated_invitation_and_shared_answer_dialog(client):
+    from tests.test_menu import StrictMarkup
+
+    markup = StrictMarkup(client.get("/family").get_data(as_text=True))
+    assert not any(element.attrs.get("id") == "login-here" for element in markup.elements)
+    assert markup.one_id("unlock-here").attrs["data-unlock-state"] == "locked"
+    assert markup.one_id("family-detail").tag == "dialog"
+    for button in ("family-stop-top", "family-stop-bottom"):
+        assert "button-danger" in markup.one_id(button).attrs["class"].split()
+    markup.one_id("invite-qr")
+    invite = StrictMarkup(client.get("/family/invite").get_data(as_text=True))
+    invite.module_script("/static/js/watashi/family-invitation.mjs")
+    assert "disabled" in invite.one_id("accept-invitation").attrs
+    assert "hidden" in invite.one_id("invite-confirmation").attrs
+    assert not any(element.attrs.get("id") == "share" for element in invite.elements)
+
+
+def test_family_invitation_login_return_and_confirmation():
+    result = subprocess.run(
+        ["node", "tests/family_invitation.mjs"], cwd=Path(__file__).resolve().parents[1],
+        capture_output=True, text=True, timeout=20, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_unknown_page_returns_404(client):
     response = client.get("/missing")
     assert response.status_code == 404

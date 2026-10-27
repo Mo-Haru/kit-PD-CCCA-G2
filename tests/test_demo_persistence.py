@@ -96,5 +96,5 @@ def test_fixture_persists_and_shares_through_real_crypto_and_apis(tmp_path, monk
     reopened = create_app(IsolatedConfig)
     with reopened.app_context():
         assert db.session.query(PrivateAnswerDocument).count() == 5
-        assert db.session.query(QrShare).count() == 3
+        assert db.session.query(QrShare).count() == 4
         assert db.session.query(FamilyShareVersion).count() == 4

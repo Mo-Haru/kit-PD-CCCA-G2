@@ -10,10 +10,12 @@ import {
   decryptBundle,
   decryptDocument,
   decryptOwnerCopy,
+  decryptQrOwnerSecret,
   detectPrf,
   encryptBundle,
   encryptDocument,
   encryptOwnerCopy,
+  encryptQrOwnerSecret,
   generateHpkeKeyPair,
   hpkeAad,
   hpkeOpen,
@@ -588,6 +590,10 @@ export async function createQrShare({ mode, expiresAt = null, selection, payload
     version: 1,
   });
   const sealed = await hpkeSeal(pair.publicKey, new TextEncoder().encode(JSON.stringify(payload)), aad);
+  const ownerSecret = await encryptQrOwnerSecret({
+    storageKey: vault.storageKey, dataKeyId: vault.dataKeyId, shareId,
+    plaintext: new TextEncoder().encode(JSON.stringify({ v: 1, privateKey: bytesToB64url(pair.privateKey) })),
+  });
   const created = await api("/api/v1/qr-shares", {
     method: "POST",
     body: {
@@ -597,6 +603,10 @@ export async function createQrShare({ mode, expiresAt = null, selection, payload
       public_key: bytesToB64url(pair.publicKey),
       start_token_hash: bytesToB64url(tokenHash),
       version: { hpke_enc: bytesToB64url(sealed.enc), ciphertext: bytesToB64url(sealed.ciphertext) },
+      owner_secret: {
+        data_key_id: vault.dataKeyId,
+        nonce: bytesToB64url(ownerSecret.nonce), ciphertext: bytesToB64url(ownerSecret.ciphertext),
+      },
     },
   });
   return {
@@ -605,6 +615,29 @@ export async function createQrShare({ mode, expiresAt = null, selection, payload
     privateKey: pair.privateKey,
     startToken,
   };
+}
+
+export async function openOwnedQrShare(share) {
+  if (!vault.storageKey || share.owner_user_id !== vault.userId) {
+    throw new Error("先に回答の暗号化を解除してください。");
+  }
+  if (!share.owner_secret) {
+    const error = new Error("この共有は旧形式のため、発行時の回答を再表示するための控えがありません。内容を確認できる共有リンクを新しく作成してください。");
+    error.code = "owner_copy_unavailable";
+    throw error;
+  }
+  const secret = share.owner_secret;
+  const opened = await decryptQrOwnerSecret({
+    storageKey: vault.storageKey, dataKeyId: secret.data_key_id, shareId: share.id,
+    nonce: b64urlToBytes(secret.nonce), ciphertext: b64urlToBytes(secret.ciphertext),
+  });
+  const bundle = JSON.parse(new TextDecoder().decode(opened));
+  if (bundle.v !== 1 || typeof bundle.privateKey !== "string") throw new Error("共有内容の控えを読み込めません。");
+  const aad = hpkeAad({ purpose: "qr", contextId: share.id, ownerId: share.owner_user_id,
+    recipientId: "qr", keyId: share.public_key, version: share.current_version });
+  const plaintext = await hpkeOpen(b64urlToBytes(bundle.privateKey), b64urlToBytes(share.version.hpke_enc),
+    b64urlToBytes(share.version.ciphertext), aad);
+  return JSON.parse(new TextDecoder().decode(plaintext));
 }
 
 export async function updateQrShare({ shareId, expectedVersion, publicKey, selection }) {

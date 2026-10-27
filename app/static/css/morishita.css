@@ -105,6 +105,15 @@
   border-color: var(--accent);
 }
 
+.sensitive .choice-list label:has(input:disabled),
+.sensitive .scope-options label:has(input:disabled),
+.sensitive .confirmation:has(input:disabled) {
+  background: var(--md-sys-color-surface-container-high);
+  border-color: var(--md-sys-color-outline-variant);
+  color: var(--md-sys-color-outline);
+  cursor: not-allowed;
+}
+
 .sensitive [hidden] {
   display: none !important;
 }

@@ -109,6 +109,23 @@ export function hpkeAad({ purpose, contextId, ownerId, recipientId, keyId, versi
   return text.encode(`hpke-v1|${purpose}|${contextId}|${ownerId}|${recipientId}|${keyId}|${version}`);
 }
 
+function qrSecretContext(dataKeyId, shareId) {
+  return `acp/qr-owner-secret/v1|${dataKeyId}|${shareId}`;
+}
+
+export async function encryptQrOwnerSecret({ storageKey, dataKeyId, shareId, plaintext }) {
+  const context = qrSecretContext(dataKeyId, shareId);
+  const key = await hkdfSha256(storageKey, new Uint8Array(32), context);
+  const nonce = randomBytes(12);
+  return { nonce, ciphertext: await aesGcmEncrypt(key, nonce, plaintext, text.encode(context)) };
+}
+
+export async function decryptQrOwnerSecret({ storageKey, dataKeyId, shareId, nonce, ciphertext }) {
+  const context = qrSecretContext(dataKeyId, shareId);
+  const key = await hkdfSha256(storageKey, new Uint8Array(32), context);
+  return aesGcmDecrypt(key, nonce, ciphertext, text.encode(context));
+}
+
 export async function generateHpkeKeyPair() {
   const hpke = suite();
   const pair = await hpke.kem.generateKeyPair();
