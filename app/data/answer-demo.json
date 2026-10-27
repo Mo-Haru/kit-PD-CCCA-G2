@@ -1,0 +1,137 @@
+{
+  "fixture_id": "answer-ui-demo-v1",
+  "categories": [
+    {
+      "id": "2162b4e9-4bf0-524f-9893-b3140561613e",
+      "title": "日々の暮らし",
+      "description": "好きなことや大切にしたいことから、試してみましょう。"
+    },
+    {
+      "id": "9055c295-bcf1-5f75-b2d4-78aaad03d63a",
+      "title": "これからの希望",
+      "description": "思いついたことを、自由に書いてみてください。"
+    }
+  ],
+  "questions": [
+    {
+      "id": "ebd6fd25-f090-5fd1-9ab8-6a744b708576",
+      "category_id": "2162b4e9-4bf0-524f-9893-b3140561613e",
+      "text": "どのように呼ばれたいですか？",
+      "input_type": "text",
+      "label": "呼ばれたい名前",
+      "placeholder": "例：サンプルさん",
+      "help": "本名ではなく、テスト用のニックネームを入力してください。",
+      "maxlength": 40,
+      "sample": "サンプルさん",
+      "question_key": "demo-name"
+    },
+    {
+      "id": "4bc6d82a-58bd-5d51-badf-57c2ca353e95",
+      "category_id": "2162b4e9-4bf0-524f-9893-b3140561613e",
+      "text": "休日はどのように過ごしたいですか？",
+      "input_type": "single_choice",
+      "help": "1つ選べます。",
+      "options": [
+        {
+          "value": "walk",
+          "text": "散歩を楽しむ"
+        },
+        {
+          "value": "read",
+          "text": "家で本を読む"
+        },
+        {
+          "value": "talk",
+          "text": "身近な人と話す"
+        },
+        {
+          "value": "undecided",
+          "text": "まだ決めていない"
+        }
+      ],
+      "sample": "walk",
+      "question_key": "demo-day-off"
+    },
+    {
+      "id": "9ee3ba2b-a323-5aa4-8007-d2d0a7013e81",
+      "category_id": "2162b4e9-4bf0-524f-9893-b3140561613e",
+      "text": "大切にしたいことは何ですか？",
+      "input_type": "multiple_choice",
+      "help": "いくつでも選べます。",
+      "options": [
+        {
+          "value": "family",
+          "text": "家族や友人との時間"
+        },
+        {
+          "value": "pace",
+          "text": "自分のペースで過ごすこと"
+        },
+        {
+          "value": "hobbies",
+          "text": "好きなことを続けること"
+        },
+        {
+          "value": "calm",
+          "text": "穏やかな暮らし"
+        }
+      ],
+      "sample": [
+        "family",
+        "pace"
+      ],
+      "question_key": "demo-values"
+    },
+    {
+      "id": "7b646f83-c800-5eeb-9280-05da59a608e0",
+      "category_id": "9055c295-bcf1-5f75-b2d4-78aaad03d63a",
+      "text": "落ち着いて過ごせる場所はどこですか？",
+      "input_type": "select",
+      "label": "過ごしたい場所",
+      "options": [
+        {
+          "value": "home",
+          "text": "自宅"
+        },
+        {
+          "value": "nature",
+          "text": "自然の多い場所"
+        },
+        {
+          "value": "family-home",
+          "text": "家族の家"
+        },
+        {
+          "value": "undecided",
+          "text": "まだ決めていない"
+        }
+      ],
+      "sample": "home",
+      "question_key": "demo-place"
+    },
+    {
+      "id": "1a596abf-36ff-51a8-b1a7-50a02e0e35f3",
+      "category_id": "9055c295-bcf1-5f75-b2d4-78aaad03d63a",
+      "text": "これからやってみたいことはありますか？",
+      "input_type": "textarea",
+      "label": "やってみたいこと",
+      "placeholder": "例：季節の花を見に出かけたい",
+      "help": "400文字以内で自由に入力できます。",
+      "maxlength": 400,
+      "sample": "季節の花を見に、近くの公園へ出かけたいです。",
+      "question_key": "demo-wish"
+    },
+    {
+      "id": "cda06109-5bb1-5e5c-99da-d6bac2beede9",
+      "category_id": "9055c295-bcf1-5f75-b2d4-78aaad03d63a",
+      "text": "身近な人に伝えておきたいことはありますか？",
+      "input_type": "textarea",
+      "label": "伝えておきたいこと",
+      "placeholder": "例：一緒に考えてほしいことなど",
+      "help": "個人情報は入力せず、テスト用の文章で試してください。",
+      "maxlength": 400,
+      "sample": "急いで決めずに、一緒にゆっくり考えてほしいです。",
+      "question_key": "demo-message"
+    }
+  ]
+}

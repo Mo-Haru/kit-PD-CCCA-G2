@@ -68,13 +68,13 @@ def _owner_secret(body: dict, owner_id: str):
     )
 
 
-def _view(share: QrShare, version: QrShareVersion | None = None) -> dict:
+def _view(share: QrShare, version: QrShareVersion | None = None, *, owner=False) -> dict:
     current = version
     if current is None:
         current = db.session.query(QrShareVersion).filter_by(
             share_id=share.id, version=share.current_version,
         ).one()
-    return {
+    result = {
         "id": share.id,
         "owner_user_id": share.owner_user_id,
         "mode": share.mode,
@@ -93,6 +93,13 @@ def _view(share: QrShare, version: QrShareVersion | None = None) -> dict:
             "created_at": iso(current.created_at),
         },
     }
+    if owner:
+        result["owner_secret"] = None if share.owner_secret_ciphertext is None else {
+            "data_key_id": share.owner_secret_data_key_id,
+            "nonce": b64encode(share.owner_secret_nonce),
+            "ciphertext": b64encode(share.owner_secret_ciphertext),
+        }
+    return result
 
 
 def _status(share: QrShare, now=None) -> str:
@@ -112,9 +119,9 @@ def create_share(body: dict) -> dict:
     expect_fields(body, CREATE_FIELDS)
     mode = body.get("mode")
     now = utcnow()
-    if mode == "emergency":
+    if mode in {"emergency", "unlimited"}:
         if body.get("expires_at") is not None:
-            fail("invalid_time", 400, "緊急用QRに期限は設定できません。", actor_id=user.id)
+            fail("invalid_time", 400, "この種類のリンクに期限は設定できません。", actor_id=user.id)
         expires = None
     elif mode == "timed":
         expires = parse_iso(body.get("expires_at"))
@@ -151,19 +158,19 @@ def create_share(body: dict) -> dict:
         db.session.rollback()
         fail("conflict", 409, "QR共有を作成できませんでした。")
         raise exc
-    return {"share": _view(share, version)}
+    return {"share": _view(share, version, owner=True)}
 
 
 def list_shares() -> dict:
     user, _session, _passkey = load_login()
     rows = db.session.query(QrShare).filter_by(owner_user_id=user.id).order_by(QrShare.created_at.desc()).limit(100).all()
-    return {"shares": [_view(row) for row in rows]}
+    return {"shares": [_view(row, owner=True) for row in rows]}
 
 
 def get_share(share_id: str) -> dict:
     user, _session, _passkey = load_login()
     share = _owned(share_id, user.id)
-    return {"share": _view(share)}
+    return {"share": _view(share, owner=True)}
 
 
 def _owned(share_id: str, user_id: str) -> QrShare:
@@ -199,7 +206,7 @@ def update_share(share_id: str, body: dict) -> dict:
         db.session.rollback()
         fail("revision_conflict", 409, "別の版があるため更新できません。")
         raise exc
-    return {"share": _view(share, row)}
+    return {"share": _view(share, row, owner=True)}
 
 
 def stop_share(share_id: str) -> dict:
@@ -219,7 +226,7 @@ def change_expiry(share_id: str, body: dict) -> dict:
     expect_fields(body, EXPIRY_FIELDS)
     share = _owned(share_id, user.id)
     if share.mode != "timed":
-        fail("invalid_mode", 400, "緊急用QRの期限は変更できません。", actor_id=user.id)
+        fail("invalid_mode", 400, "期限を変更できるのは期限付きリンクだけです。", actor_id=user.id)
     if body.get("expected_version") != share.current_version:
         fail("revision_conflict", 409, "別の版があるため変更できません。", actor_id=user.id)
     expires = parse_iso(body.get("expires_at"))
@@ -231,7 +238,7 @@ def change_expiry(share_id: str, body: dict) -> dict:
     share.expires_at = expires
     audit("qr_expiry_changed", "qr_share", share.id, "success", actor_id=user.id)
     db.session.commit()
-    return {"share": _view(share)}
+    return {"share": _view(share, owner=True)}
 
 
 def _session_from_cookie() -> QrViewSession:

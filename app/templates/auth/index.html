@@ -1,30 +1,70 @@
-{% extends "base.html" %}
-{% block title %}パスキー認証 | 意思の記録{% endblock %}
-{% block extra_head %}
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>アカウント作成・ログイン | 意思の記録</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/morishita.css') }}">
-{% endblock %}
-{% block content %}
-  <div class="sensitive">
-    <h1>パスキー認証</h1>
-    <ul class="warning">
-      <li>パスキーをすべて失うと、保存した回答は復号できません。復旧用の秘密はサーバーに預かりません。</li>
-      <li>同期パスキーは、同じアカウントの他の端末でも使えることがあります。その端末からも解除できる場合があります。</li>
-      <li>PRFに対応していないブラウザでは登録を完了できません。非対応のまま登録したことにはしません。</li>
-      <li>パスキーを無効化しても、同期先に残ったコピーや相手が保存した共有までは消せません。</li>
-    </ul>
-    <p id="session">状態を確認しています。</p>
-    <p id="status" role="status" aria-live="polite"></p>
-    <label for="display-name">表示名</label>
-    <input id="display-name" name="display-name" autocomplete="nickname" maxlength="100" required>
-    <button id="register" type="button">パスキーを登録</button>
-    <button id="login" type="button">パスキーでログイン</button>
-    <button id="unlock" type="button">鍵を解除</button>
-    <button id="logout" type="button">ログアウト</button>
-    <h2>登録済みのパスキー</h2>
-    <label><input id="confirm-last" type="checkbox"> 最後のパスキーを無効化すると、過去のデータを復号できなくなることを確認しました</label>
-    <ul id="passkeys"></ul>
-    <button id="add-passkey" type="button">パスキーを追加</button>
-    <p><a href="{{ url_for('protection_pages.family') }}">家族共有</a> / <a href="{{ url_for('protection_pages.transfer') }}">端末移行</a></p>
-  </div>
-  <script type="module" src="{{ url_for('static', filename='js/watashi/account.mjs') }}"></script>
-{% endblock %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/account.css') }}">
+</head>
+<body class="account-body">
+  <main id="main" class="account-shell">
+    <a class="account-brand" href="{{ url_for('main.index') }}">意思の記録</a>
+    <section id="auth-entry" class="sensitive account-page" aria-labelledby="account-title" data-return-url="{{ return_url }}">
+      <p class="account-eyebrow">はじめてご利用の方へ</p>
+      <h1 id="account-title">アカウントを作成</h1>
+      <p class="account-intro">表示名を入力し、注意事項に同意してパスキーを登録しましょう。</p>
+      <p id="session" class="account-session">ログイン状態を確認しています。</p>
+      <p id="status" class="account-status" role="status" aria-live="polite" aria-atomic="true"></p>
+
+      <div id="guest-actions">
+        <form id="register-form" method="post" action="{{ url_for('auth.index') }}">
+          <fieldset id="register-fields" class="account-form-fields" disabled>
+            <div class="account-field md-field">
+              <label class="md-field-label" for="display-name">表示名（ニックネーム）</label>
+              <input id="display-name" class="md-field-control" name="display_name" type="text" autocomplete="nickname" maxlength="100" placeholder="例：はなこ" aria-describedby="display-name-help" required>
+              <p id="display-name-help" class="md-field-help">100文字以内。家族などへの表示用です。本名や住所などの個人情報は入力しないでください。</p>
+            </div>
+            <section id="registration-notice" class="account-privacy" aria-labelledby="privacy-title">
+              <h2 id="privacy-title">暗号化とパスキー紛失時の注意</h2>
+              <ul>
+                <li>回答として記録する個人情報・回答本文は、利用者の端末内で暗号化してから保存します。回答の平文や復号用の秘密鍵をサーバーに保存せず、運営では回答本文を復号できません。</li>
+                <li>本人の記録を復号するには、登録したパスキーを利用できる端末が必要です。同期済みのパスキーを使える別の端末でも開ける場合があります。</li>
+                <li><strong>利用できるパスキーをすべて失うと、情報の復元は困難となり、運営による復元はできません。</strong>端末やパスキーの紛失に備えてください。</li>
+                <li>表示名やログイン・共有管理の情報はサーバーで管理します。表示名は暗号化の対象外です。個人情報がすべて暗号化されるわけではないため、本名などは表示名に使わないでください。</li>
+                <li>本人が共有した範囲の情報は、共有先の端末でも閲覧できます。</li>
+              </ul>
+            </section>
+            <label class="account-consent" for="privacy-consent">
+              <input id="privacy-consent" name="privacy_consent" type="checkbox" required>
+              <span>暗号化の範囲と、パスキーを失った場合に運営では情報を復元できないことを確認し、同意します。</span>
+            </label>
+            <button id="register" class="account-primary" type="submit" disabled>同意してアカウントを作成</button>
+          </fieldset>
+        </form>
+        <p class="account-help">パスワードは不要です。端末の案内に従ってパスキーを登録します。</p>
+
+
+        <div class="account-login">
+          <p>すでにアカウントをお持ちの方</p>
+          <button id="login" class="account-secondary" type="button" disabled>パスキーでログイン</button>
+        </div>
+      </div>
+
+
+      <details class="account-details">
+        <summary>パスキーについて</summary>
+        <ul>
+
+          <li>PRFに対応したブラウザとパスキーが必要です。対応していない場合、登録は完了しません。</li>
+          <li>パスキーを無効化しても、同期先に残ったコピーや相手が保存した共有までは消せません。</li>
+        </ul>
+      </details>
+      <noscript><p class="account-caution">アカウント作成・ログインには、ブラウザのJavaScriptを有効にしてください。</p></noscript>
+    </section>
+    <a class="account-back" href="{{ url_for('main.index') }}">ホームに戻る</a>
+  </main>
+  <script type="module" src="{{ url_for('static', filename='js/watashi/auth-entry.mjs') }}"></script>
+</body>
+</html>

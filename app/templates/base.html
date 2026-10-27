@@ -1,3 +1,4 @@
+{% from "_navigation_icons.html" import icon %}
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -7,30 +8,62 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   {% block extra_head %}{% endblock %}
 </head>
-<body>
+<body class="site-body">
   <a class="skip" href="#main">本文へ</a>
-  <header>
+  <header id="site-header">
     <div class="wrap header-inner">
+      <button id="menu-toggle" class="menu-toggle" type="button" aria-controls="site-menu" aria-expanded="false" aria-label="メニューを開く" hidden>
+        {{ icon("menu", "menu-icon") }}
+      </button>
       <a class="brand" href="{{ url_for('main.index') }}">意思の記録</a>
-      <nav aria-label="主要">
-        <a href="{{ url_for('main.index') }}" {% if request.endpoint == 'main.index' %}aria-current="page"{% endif %}>ホーム</a>
-        <a href="{{ url_for('answers.index') }}" {% if request.endpoint == 'answers.index' %}aria-current="page"{% endif %}>回答</a>
-        <a href="{{ url_for('sharing.index') }}" {% if request.endpoint == 'sharing.index' %}aria-current="page"{% endif %}>共有</a>
-        <a href="{{ url_for('auth.index') }}" {% if request.endpoint == 'auth.index' %}aria-current="page"{% endif %}>認証</a>
-        <a href="{{ url_for('protection_pages.family') }}" {% if request.endpoint == 'protection_pages.family' %}aria-current="page"{% endif %}>家族</a>
-        <a href="{{ url_for('protection_pages.transfer') }}" {% if request.endpoint == 'protection_pages.transfer' %}aria-current="page"{% endif %}>移行</a>
-        <a href="{{ url_for('main.health') }}">起動確認</a>
-      </nav>
+      <div id="header-account" class="header-account" data-session-state="loading">
+        <p class="header-session" role="status" aria-live="polite" aria-atomic="true">
+          <span id="header-session-label">ログイン状態を確認中…</span>
+          <span id="header-session-name" class="header-session-name" hidden></span>
+          <span class="header-mobile-session">ログイン済み</span>
+        </p>
+        <a id="header-account-link" class="header-account-link" data-auth-link href="{{ url_for('auth.index', next=request.full_path if request.query_string else request.path) }}" data-account-url="{{ url_for('auth.account') }}" {% if request.endpoint == 'auth.account' %}aria-current="page"{% endif %}>ログイン・新規登録</a>
+      </div>
     </div>
   </header>
-  <div class="banner">
-    <p class="wrap">開発用の土台です。回答の入力画面とQRコードの画像表示は未実装です。パスキー、家族共有、QRの閲覧、端末移行は使えます。</p>
+  <div id="site-layout" class="site-layout">
+    <div id="menu-backdrop" class="menu-backdrop" aria-hidden="true" hidden></div>
+    <aside id="site-menu" class="site-menu" aria-labelledby="site-menu-title">
+      <div class="menu-heading">
+        <h2 id="site-menu-title">メニュー</h2>
+        <button id="menu-close" class="menu-close" type="button" aria-label="メニューを閉じる" hidden>{{ icon("close", "menu-icon") }}</button>
+      </div>
+      <div class="menu-scroll">
+        <div id="menu-account" class="menu-account" data-session-state="loading">
+          <p class="menu-session" role="status" aria-live="polite" aria-atomic="true">
+            <span id="menu-session-label">ログイン状態を確認中…</span>
+            <span id="menu-session-name" class="menu-session-name" hidden></span>
+          </p>
+          <a id="menu-account-link" class="menu-account-link" data-auth-link href="{{ url_for('auth.index', next=request.full_path if request.query_string else request.path) }}" {% if request.endpoint == 'auth.account' %}aria-current="page"{% endif %}>ログイン・新規登録</a>
+        </div>
+        <nav aria-label="主要">
+          <a href="{{ url_for('main.index') }}" {% if request.endpoint == 'main.index' %}aria-current="page"{% endif %}>{{ icon("home") }}<span class="nav-label">ホーム</span></a>
+          <a href="{{ url_for('answers.index') }}" {% if request.endpoint in ('answers.index', 'answers.demo') %}aria-current="page"{% endif %}>{{ icon("answers") }}<span class="nav-label">回答</span></a>
+          <a href="{{ url_for('sharing.index') }}" {% if request.endpoint == 'sharing.index' %}aria-current="page"{% endif %}>{{ icon("sharing") }}<span class="nav-label">共有</span></a>
+          <a href="{{ url_for('protection_pages.family') }}" {% if request.endpoint in ('protection_pages.family', 'protection_pages.family_invite') %}aria-current="page"{% endif %}>{{ icon("family") }}<span class="nav-label">家族</span></a>
+          <a href="{{ url_for('protection_pages.transfer') }}" {% if request.endpoint == 'protection_pages.transfer' %}aria-current="page"{% endif %}>{{ icon("transfer") }}<span class="nav-label">移行</span></a>
+          <a href="{{ url_for('main.health') }}">{{ icon("health") }}<span class="nav-label">起動確認</span></a>
+        </nav>
+      </div>
+    </aside>
+    <div id="site-content" class="site-content" tabindex="0" role="region" aria-label="ページ本文">
+      <div class="banner">
+        <p class="wrap">{% block development_notice %}開発用の土台です。回答の入力画面とQRコードの画像表示は未実装です。パスキー、家族共有、QRの閲覧、端末移行は使えます。{% endblock %}</p>
+      </div>
+      <main id="main" class="wrap" tabindex="-1">
+        {% block content %}{% endblock %}
+      </main>
+      <footer>
+        <p class="wrap">ローカル開発用です。本番のデータベースと公開方法は未決定です。</p>
+      </footer>
+    </div>
   </div>
-  <main id="main" class="wrap">
-    {% block content %}{% endblock %}
-  </main>
-  <footer>
-    <p class="wrap">ローカル開発用です。本番のデータベースと公開方法は未決定です。</p>
-  </footer>
+  <script type="module" src="{{ url_for('static', filename='js/watashi/menu.mjs') }}"></script>
+  <script type="module" src="{{ url_for('static', filename='js/watashi/header-session.mjs') }}"></script>
 </body>
 </html>

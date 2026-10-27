@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}家族からの招待 | 意思の記録{% endblock %}
+{% block extra_head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/morishita.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/answers.css') }}">
+{% endblock %}
+{% block content %}
+  <section id="family-invitation" class="sensitive answer-demo" aria-labelledby="invitation-title">
+    <h1 id="invitation-title">意思の共有の招待を受けました</h1>
+    <p id="invite-session" role="status" aria-live="polite">ログイン状態を確認しています。</p>
+    <p id="invite-status" class="status-message" role="status" aria-live="polite"></p>
+    <div id="invite-guest" hidden>
+      <p>ログインして、招待を承諾してください。</p>
+      <a id="invite-login" class="demo-launch" href="{{ url_for('auth.index', next=url_for('protection_pages.family_invite')) }}">ログインして招待を承諾</a>
+    </div>
+    <div id="invite-confirmation" hidden>
+      <h2>招待を承諾しますか？</h2>
+      <p>承諾後、招待した方が確認すると家族として登録されます。回答の共有範囲は、登録後にそれぞれが選択します。</p>
+      <button id="accept-invitation" class="button-primary" type="button" disabled>招待を承諾する</button>
+    </div>
+    <p><a href="{{ url_for('protection_pages.family') }}">家族画面へ</a></p>
+  </section>
+  <script type="module" src="{{ url_for('static', filename='js/watashi/family-invitation.mjs') }}"></script>
+{% endblock %}

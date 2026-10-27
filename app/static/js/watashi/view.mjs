@@ -131,9 +131,9 @@ export async function loadQrPage({ api: call, storage, shareId, secrets }) {
   }
 }
 
-function showPayload(container, payload) {
+function showPayload(container, payload, catalog) {
   if (payload && payload.items && typeof payload.items === "object") {
-    fillAnswerList(container, entriesFromPayload(payload, null));
+    fillAnswerList(container, entriesFromPayload(payload, catalog));
     return;
   }
   container.replaceChildren();
@@ -142,14 +142,25 @@ function showPayload(container, payload) {
   container.append(row);
 }
 
-function bindPage() {
-  const status = document.querySelector("#status");
-  const output = document.querySelector("#output");
-  const shareId = document.querySelector("#viewer").dataset.shareId;
+export function bindQrViewPage(root, {
+  call = api,
+  storage = sessionStorage,
+  address = { hash: location.hash, pathname: location.pathname },
+  navigation = history,
+  decrypt = openSharedPayload,
+} = {}) {
+  const node = id => root.querySelector(`#${id}`);
+  const status = node("status");
+  const output = node("output");
+  const shareId = node("viewer").dataset.shareId;
+  let generation = 0;
+  let ended = false;
+  let busy = false;
+  const isCurrent = ticket => !ended && ticket === generation;
   const locationLike = {
-    hash: location.hash,
+    hash: address.hash,
     replaceHash() {
-      history.replaceState(null, "", location.pathname);
+      navigation.replaceState(null, "", address.pathname);
     },
   };
 
@@ -159,86 +170,98 @@ function bindPage() {
 
   function showFacts(current) {
     const facts = viewFacts(current);
-    document.querySelector("#validity").textContent = facts.validity;
-    document.querySelector("#updated").textContent = facts.updated;
+    node("validity").textContent = facts.validity;
+    node("updated").textContent = facts.updated;
   }
 
-  async function render(current, secrets) {
+  async function render(current, secrets, ticket) {
+    const opened = await decrypt(secrets.privateKey, current, shareId);
+    if (!isCurrent(ticket)) return;
+    const catalog = await call("/api/v1/answers/questions").catch(() => null);
+    if (!isCurrent(ticket)) return;
     showFacts(current);
-    const opened = await openSharedPayload(secrets.privateKey, current, shareId);
-    showPayload(output, opened);
+    showPayload(output, opened, catalog);
     const absolute = current.session?.absolute_expires_at || "";
     show(`閲覧中です。絶対期限 ${absolute} は延長されません。`);
   }
 
-  let busy = false;
   async function openExplicit(secrets) {
-    if (busy) return;
+    if (busy || ended) return;
+    const ticket = ++generation;
     busy = true;
-    const openButton = document.querySelector("#open");
+    const openButton = node("open");
     openButton.disabled = true;
     try {
-      const result = await resumeOrStartQr({ api, shareId, secrets, resumeOnly: false });
-      sessionStorage.setItem(OPENED, shareId);
-      await render(result.current, secrets);
+      const result = await resumeOrStartQr({ api: call, shareId, secrets, resumeOnly: false });
+      if (!isCurrent(ticket)) return;
+      storage.setItem(OPENED, shareId);
+      await render(result.current, secrets, ticket);
+    } catch (error) {
+      if (!isCurrent(ticket)) return;
+      output.replaceChildren();
+      show(describeViewError(error));
     } finally {
-      busy = false;
-      openButton.disabled = false;
+      if (isCurrent(ticket)) {
+        busy = false;
+        openButton.disabled = false;
+      }
     }
   }
 
-  const secrets = captureQrSecrets(sessionStorage, locationLike, shareId);
-  loadQrPage({ api, storage: sessionStorage, shareId, secrets }).then(async (plan) => {
+  const secrets = captureQrSecrets(storage, locationLike, shareId);
+  const initialTicket = generation;
+  loadQrPage({ api: call, storage, shareId, secrets }).then(async (plan) => {
+    if (!isCurrent(initialTicket)) return;
     if (plan.action === "missing") {
       show("閲覧に必要な情報がこの端末にありません。QRのリンクをこの端末で開いてください。");
       return;
     }
     if (plan.action === "resume") {
       try {
-        await render(plan.result.current, secrets);
+        await render(plan.result.current, secrets, initialTicket);
       } catch (error) {
+        if (!isCurrent(initialTicket)) return;
         output.replaceChildren();
         show(describeViewError(error));
       }
       return;
     }
     show(plan.error ? describeViewError(plan.error) : "内容を開くを押すまで、閲覧は開始しません。");
-  }).catch((error) => show(describeViewError(error)));
-
-  document.querySelector("#open").addEventListener("click", async () => {
-    const currentSecrets = readQrSecrets(sessionStorage, shareId);
-    try {
-      await openExplicit(currentSecrets);
-    } catch (error) {
-      output.replaceChildren();
-      show(describeViewError(error));
-    }
+  }).catch((error) => {
+    if (isCurrent(initialTicket)) show(describeViewError(error));
   });
 
-  document.querySelector("#reopen").addEventListener("click", async () => {
-    const next = replaceAttempt(sessionStorage, shareId);
+  node("open").addEventListener("click", () => {
+    if (busy || ended) return;
+    return openExplicit(readQrSecrets(storage, shareId));
+  });
+
+  node("reopen").addEventListener("click", () => {
+    if (busy || ended) return;
+    const next = replaceAttempt(storage, shareId);
     if (!next) {
       show("閲覧に必要な情報がこの端末にありません。");
       return;
     }
-    try {
-      await openExplicit(next);
-    } catch (error) {
-      output.replaceChildren();
-      show(describeViewError(error));
-    }
+    return openExplicit(next);
   });
 
-  document.querySelector("#end").addEventListener("click", async () => {
+  node("end").addEventListener("click", async () => {
+    if (ended) return;
+    ended = true;
+    generation += 1;
+    clearQrSecrets(storage);
+    storage.removeItem(OPENED);
+    output.replaceChildren();
+    node("validity").textContent = "";
+    node("updated").textContent = "";
+    for (const id of ["open", "reopen", "end"]) node(id).disabled = true;
+    show("閲覧を終了し、この端末に置いた秘密を消しました。");
     try {
-      await api("/api/v1/qr-view/end", { method: "POST", body: {} });
+      await call("/api/v1/qr-view/end", { method: "POST", body: {} });
     } catch (_error) {
       /* 期限切れでも端末側の秘密は消す。 */
     }
-    clearQrSecrets(sessionStorage);
-    sessionStorage.removeItem(OPENED);
-    output.replaceChildren();
-    show("閲覧を終了し、この端末に置いた秘密を消しました。");
   });
 }
 
@@ -250,4 +273,4 @@ function decode(value) {
   return out;
 }
 
-if (typeof document !== "undefined" && document.querySelector("#viewer")) bindPage();
+if (typeof document !== "undefined" && document.querySelector("#viewer")) bindQrViewPage(document);

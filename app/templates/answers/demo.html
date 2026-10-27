@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}回答画面のテスト | 意思の記録{% endblock %}
+{% block extra_head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/morishita.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/answers.css') }}">
+{% endblock %}
+{% block development_notice %}ダミー質問を使う保存・共有のテスト画面です。回答は端末内で暗号化してDBに保存します。{% endblock %}
+{% block content %}
+  <section class="sensitive answer-demo" aria-labelledby="demo-title">
+    <p class="demo-eyebrow">UIテスト · 全{{ catalog.questions|length }}問</p>
+    <h1 id="demo-title">わたしのことを答えてみる</h1>
+    <p class="page-intro">すべて任意です。空欄のままでも回答内容を確認できます。</p>
+    <p class="demo-notice">ダミーデータで試してください。保存した回答は、次回もログインして鍵を解除すると読み込めます。未保存の入力は画面を離れると消えます。</p>
+    <section class="demo-access" aria-label="DB保存の準備">
+      <p id="demo-storage-status" class="status-message" role="status" aria-live="polite">ログイン状態を確認しています。</p>
+      <div class="actions">
+        <a id="demo-login" class="demo-launch" href="{{ url_for('auth.index', next=url_for('answers.demo')) }}">ログイン・新規登録</a>
+        <button id="demo-unlock" type="button" hidden>この画面で鍵を解除</button>
+        <button id="demo-load" type="button" disabled>保存内容を読み直す（入力を置換）</button>
+      </div>
+    </section>
+
+    <div class="demo-progress">
+      <label id="demo-progress-label" for="demo-progress">回答状況</label>
+      <span id="demo-count" role="status" aria-live="polite" aria-atomic="true">0 / {{ catalog.questions|length }}問</span>
+      <progress id="demo-progress" value="0" max="{{ catalog.questions|length }}" aria-labelledby="demo-progress-label"></progress>
+    </div>
+    <p id="demo-status" class="demo-status" role="status" aria-live="polite" aria-atomic="true"></p>
+
+    <form id="demo-answer-form" method="dialog" autocomplete="off">
+      <fieldset id="demo-fields" class="demo-fields" disabled>
+        <legend class="demo-form-legend">ダミー質問への回答</legend>
+        <div class="actions demo-tools">
+          <button id="demo-fill" type="button">サンプル回答を入れる</button>
+          <button id="demo-reset" type="button">入力をリセット</button>
+        </div>
+        {% for category in catalog.categories %}
+          <section class="demo-category" aria-labelledby="category-{{ category.id }}">
+            <h2 id="category-{{ category.id }}">{{ category.title }}</h2>
+            <p class="note">{{ category.description }}</p>
+            {% for question in catalog.questions|selectattr('category_id', 'equalto', category.id) %}
+              <fieldset class="demo-question" data-demo-question data-question-id="{{ question.id }}" data-question-title="{{ question.text }}">
+                <legend><span class="demo-number" aria-hidden="true">{{ question.number }}</span>{{ question.text }}</legend>
+                {% if question.input_type in ('single_choice', 'multiple_choice') %}
+                  <p id="{{ question.id }}-help" class="demo-choice-help">{{ question.help }}</p>
+                  <div class="demo-choices">
+                    {% for option in question.options %}
+                      <label class="demo-choice" for="{{ question.id }}-{{ option.value }}">
+                        <input id="{{ question.id }}-{{ option.value }}" name="{{ question.id }}" type="{{ 'radio' if question.input_type == 'single_choice' else 'checkbox' }}" value="{{ option.value }}" aria-describedby="{{ question.id }}-help" data-answer-label="{{ option.text }}" data-demo-sample="{{ 'true' if (option.value == question.sample if question.input_type == 'single_choice' else option.value in question.sample) else 'false' }}">
+                        <span>{{ option.text }}</span>
+                      </label>
+                    {% endfor %}
+                  </div>
+                {% else %}
+                  <div class="md-field{% if question.input_type in ('select', 'textarea') %} md-field--raised{% endif %}">
+                    <label class="md-field-label" for="{{ question.id }}">{{ question.label }}</label>
+                    {% if question.input_type == 'select' %}
+                      <select id="{{ question.id }}" name="{{ question.id }}" class="md-field-control" data-demo-sample="{{ question.sample }}">
+                        <option value="">選択してください</option>
+                        {% for option in question.options %}<option value="{{ option.value }}">{{ option.text }}</option>{% endfor %}
+                      </select>
+                    {% elif question.input_type == 'textarea' %}
+                      <textarea id="{{ question.id }}" name="{{ question.id }}" class="md-field-control" rows="3" maxlength="{{ question.maxlength }}" placeholder="{{ question.placeholder }}" aria-describedby="{{ question.id }}-help" data-demo-sample="{{ question.sample }}"></textarea>
+                    {% else %}
+                      <input id="{{ question.id }}" name="{{ question.id }}" class="md-field-control" type="text" maxlength="{{ question.maxlength }}" placeholder="{{ question.placeholder }}" aria-describedby="{{ question.id }}-help" data-demo-sample="{{ question.sample }}">
+                    {% endif %}
+                    {% if question.help %}<p id="{{ question.id }}-help" class="md-field-help">{{ question.help }}</p>{% endif %}
+                  </div>
+                {% endif %}
+              </fieldset>
+            {% endfor %}
+          </section>
+        {% endfor %}
+        <div class="actions demo-actions">
+          <button class="button-primary" type="submit">回答内容を確認する</button>
+        </div>
+      </fieldset>
+    </form>
+    <section id="demo-review" class="demo-review" aria-labelledby="demo-review-title" tabindex="-1" hidden>
+      <h2 id="demo-review-title">回答内容の確認</h2>
+      <p class="note">確認した内容を保存するには、下の「暗号化してDBに保存」を押してください。</p>
+      <dl id="demo-review-list" class="demo-review-list"></dl>
+      <div class="actions">
+        <button id="demo-save" class="button-primary" type="button" disabled>暗号化してDBに保存</button>
+        <button id="demo-edit" type="button">回答を編集する</button>
+      </div>
+    </section>
+    <div id="demo-sharing-links" class="demo-notice" hidden>
+      <p>保存した回答から、共有する範囲を選んで試せます。共有先の画面でも鍵の解除が必要です。</p>
+      <div class="actions">
+        <a class="demo-launch" href="{{ url_for('sharing.index') }}">共有リンクを作る</a>
+        <a class="demo-launch" href="{{ url_for('protection_pages.family') }}">家族共有を試す</a>
+      </div>
+    </div>
+    <noscript><p class="demo-notice">回答の入力と確認にはJavaScriptを有効にしてください。</p></noscript>
+    <p class="demo-back"><a href="{{ url_for('answers.index') }}">通常の回答画面に戻る</a></p>
+  </section>
+  <script type="module" src="{{ url_for('static', filename='js/watashi/answer-demo-page.mjs') }}"></script>
+{% endblock %}

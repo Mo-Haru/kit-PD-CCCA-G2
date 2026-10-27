@@ -63,10 +63,12 @@ class BaseConfig:
 
 class DevelopmentConfig(BaseConfig):
     DEBUG = True
+    DEMO_QUESTIONS_ENABLED = True
 
 
 class TestingConfig(BaseConfig):
     TESTING = True
+    DEMO_QUESTIONS_ENABLED = True
     SECRET_KEY = "test-only"
     CONTACT_HASH_KEY = "test-only-contact-hash-key-32b!!"
     WEBAUTHN_ORIGIN = "http://localhost"
