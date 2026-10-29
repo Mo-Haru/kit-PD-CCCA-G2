@@ -70,8 +70,10 @@ def test_wrong_codes_lock_the_request(app):
     locked = post(owner, f"/api/v1/family/invitations/{invitation_id}/confirm", {"code": wrong})
     assert locked.status_code == 409
     assert locked.get_json()["error"] == "confirmation_locked"
+    # 無効にした後は、正しいコードでも承認できない。
     late = post(owner, f"/api/v1/family/invitations/{invitation_id}/confirm", {"code": confirmation["code"]})
-    assert late.status_code == 400
+    assert late.status_code == 409
+    assert late.get_json()["error"] == "confirmation_locked"
     assert post(owner, "/api/v1/family/invitations/confirm-link", {"token": confirmation["token"]}).status_code in {400, 404}
     assert post(recipient, f"/api/v1/family/invitations/{invitation_id}/confirmation").status_code == 400
     assert connections(app) == 0

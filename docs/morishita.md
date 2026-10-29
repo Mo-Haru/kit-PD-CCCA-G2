@@ -135,6 +135,8 @@ try {
    - 確認リンク: `/family/confirm` を開き、「パスキーで本人確認して家族に追加」を押すと `POST /api/v1/family/invitations/confirm-link` に `{ "token": ... }` を送ります。招待したアカウント以外では、招待の有無を区別せず404です。開いただけでは登録しません。
 5. 承認すると接続を作り、確認情報は無効になります。応答は `{ connection_id, recipient_display_name }` です。
 
+招待の状態の変化（申請、再発行、承認、誤入力の加算、取り消し、期限切れ）は、すべてDBの条件付き `UPDATE` 1回で行います。たとえば承認は「確認待ち・同じ申請者・期限内・提示されたコード（またはリンク）のハッシュが今の値と一致」を条件に `accepted` にし、1件更新できたときだけ同じトランザクションで接続を作ります。このため、承認と再発行・取り消しが同時に起きても、成功するのはどちらか一方です。誤入力は、確認待ちで5回未満のときだけ加算します。同時に送っても5回を超えて試せません。無効になった後の承認は409 `confirmation_locked` です。
+
 Bが確認情報を閉じてしまった場合や、Aがコードを間違えた場合は、Bが `POST /api/v1/family/invitations/<id>/confirmation` で再発行できます（家族画面の「確認コードを再発行」）。前のリンクとコードは使えなくなり、失敗回数は0に戻ります。この変更より前に申請された `awaiting_sender` の招待には確認情報がないため、承認は409 `confirmation_required` になります。Bに再発行してもらってください。列は `init-db` の手順 `20261029_family_invite_confirmation` で追加します。
 
 共有の作成は `POST /api/v1/family/shares` です。`confirmed` が `true` でないと保存しません。`id` はクライアントが作ったUUIDで、暗号のAADに入れます。`recipient_key_id` が相手の現在の有効な鍵と違うときは409 `key_changed` と `current_key_id` を返し、新しい版は作りません。
