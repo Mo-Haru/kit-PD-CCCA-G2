@@ -11,7 +11,14 @@ function page() {
     addEventListener(name, callback) { this.listeners[name] = callback; },
     fire(name) { return this.listeners[name](); },
   }]));
-  return { nodes, querySelector: selector => nodes[selector.slice(1)] };
+  const events = {};
+  return {
+    nodes, querySelector: selector => nodes[selector.slice(1)],
+    defaultView: {
+      addEventListener(name, callback) { events[name] = callback; },
+      dispatch(name) { events[name]?.(); },
+    },
+  };
 }
 const token = "k".repeat(43);
 function addressFor(hash = `#token=${token}`) {
@@ -104,4 +111,77 @@ assert.equal(posts.length, sent);
 const invalid = page();
 await bindFamilyConfirm(invalid, { call: () => { throw new Error("must not call"); }, reauth, address: addressFor(""), navigation: navigationFor(addressFor(""), []) });
 assert.ok(invalid.nodes["confirm-session"].textContent.includes("確認できません"));
+// Opening another applicant's link in the same tab only changes the fragment.
+// The page must never approve the first applicant from that state.
+const otherToken = "m".repeat(43);
+for (const dispatch of [true, false]) {
+  const changed = page();
+  const changedAddress = addressFor();
+  const changedPaths = [];
+  await bindFamilyConfirm(changed, { call: api, reauth, address: changedAddress, navigation: navigationFor(changedAddress, changedPaths) });
+  const before = posts.length;
+  const reauthsBefore = reauths;
+  changedAddress.hash = `#token=${otherToken}`;
+  if (dispatch) changed.defaultView.dispatch("hashchange");
+  await changed.nodes["confirm-link"].fire("click");
+  assert.equal(posts.length, before);
+  assert.equal(reauths, reauthsBefore);
+  assert.equal(changed.nodes["confirm-link"].disabled, true);
+  assert.equal(changed.nodes["confirm-action"].hidden, true);
+  assert.ok(changed.nodes["confirm-status"].textContent.includes("再読み込み"));
+  // Returning to the first fragment does not reinstate the old link.
+  changedAddress.hash = `#token=${token}`;
+  changed.defaultView.dispatch("hashchange");
+  await changed.nodes["confirm-link"].fire("click");
+  assert.equal(posts.length, before);
+  assert.deepEqual(changedPaths, []);
+}
+
+// A fragment change while the passkey prompt is open stops before sending the old token.
+{
+  const changed = page();
+  const changedAddress = addressFor();
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  let reached;
+  const waiting = new Promise(resolve => { reached = resolve; });
+  await bindFamilyConfirm(changed, {
+    call: api, address: changedAddress, navigation: navigationFor(changedAddress, []),
+    reauth: () => { reached(); return pending; },
+  });
+  const before = posts.length;
+  const click = changed.nodes["confirm-link"].fire("click");
+  await waiting;
+  changedAddress.hash = `#token=${otherToken}`;
+  changed.defaultView.dispatch("hashchange");
+  release();
+  await click;
+  assert.equal(posts.length, before);
+  assert.equal(changed.nodes["confirm-link"].disabled, true);
+  assert.ok(changed.nodes["confirm-status"].textContent.includes("再読み込み"));
+}
+
+// A fragment change after the request was sent reports which applicant was added, without claiming the new link.
+{
+  const changed = page();
+  const changedAddress = addressFor();
+  const changedPaths = [];
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  let reached;
+  const waiting = new Promise(resolve => { reached = resolve; });
+  reply = () => { reached(); return pending; };
+  await bindFamilyConfirm(changed, { call: api, reauth, address: changedAddress, navigation: navigationFor(changedAddress, changedPaths) });
+  const click = changed.nodes["confirm-link"].fire("click");
+  await waiting;
+  changedAddress.hash = `#token=${otherToken}`;
+  changed.defaultView.dispatch("hashchange");
+  release({ connection_id: "conn-2", recipient_display_name: "最初の申請者" });
+  await click;
+  assert.deepEqual(posts.at(-1), { token });
+  assert.ok(changed.nodes["confirm-status"].textContent.includes("変更前の確認リンクで 最初の申請者 さんを家族に追加しました"));
+  assert.deepEqual(changedPaths, []);
+  assert.equal(changedAddress.hash, `#token=${otherToken}`);
+  assert.equal(changed.nodes["confirm-link"].disabled, true);
+}
 console.log("Family confirmation link page passed");
