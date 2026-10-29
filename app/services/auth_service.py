@@ -286,6 +286,11 @@ def finish_registration(body: dict) -> ActionResult:
     verified = _verify_registration(credential, challenge.challenge)
     if db.session.query(PasskeyCredential).filter_by(credential_id=verified.credential_id).first():
         fail("credential_exists", 409, "このパスキーはすでに登録されています。")
+    # 検証に成功した登録だけを数える（偽の検証要求でサイト全体の枠を使い切られないように）。
+    # 行を追加する前に呼ぶ。enforce_rateは数えた回数をその場で確定させる。
+    enforce_rate("register", message="この接続元からの新規登録が多すぎます。時間をおいてやり直してください。")
+    enforce_rate("register_global", ident="all",
+                 message="現在、新規登録を一時的に制限しています。時間をおいてやり直してください。")
     stored = challenge.request_options
     wrapped = _envelope(body, stored["prf_input"])
     bundle_ct, bundle_nonce = _bundle(body)

@@ -34,6 +34,12 @@ def create_app(config_object=None):
 
         config_object = get_config()
     app.config.from_object(config_object)
+    proxies = int(app.config.get("TRUSTED_PROXY_COUNT", 0) or 0)
+    if proxies:
+        from werkzeug.middleware.proxy_fix import ProxyFix
+
+        # 信頼する段数だけ X-Forwarded-For をたどる。それより外側の値は偽装できるので使わない。
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=proxies, x_proto=0, x_host=0, x_port=0, x_prefix=0)
 
     Path(app.instance_path).mkdir(parents=True, exist_ok=True)
     db.init_app(app)
