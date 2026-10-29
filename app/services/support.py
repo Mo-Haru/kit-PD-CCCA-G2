@@ -215,36 +215,64 @@ def client_key() -> str:
     return str(address)
 
 
+def _rate_bucket(scope: str, ident: str | None) -> tuple[str, int, int]:
+    limit, window = current_app.config["RATE_LIMITS"][scope]
+    ident = client_key() if ident is None else ident
+    return hashlib.sha256(f"{scope}|{ident}".encode()).hexdigest(), int(limit), int(window)
+
+
+def ensure_rate_bucket(scope: str, ident: str | None = None) -> None:
+    """バケット行が無ければ作る。この中でコミットするので、ロックを取る前に呼ぶ。"""
+    if not current_app.config.get("RATELIMIT_ENABLED", True):
+        return
+    key, _limit, _window = _rate_bucket(scope, ident)
+    if db.session.get(RateLimitBucket, key) is not None:
+        return
+    try:
+        # 窓は切れた状態で作り、最初の1回も take_rate の窓の更新で数える。
+        db.session.add(RateLimitBucket(bucket_key=key, window_started_at=datetime(1970, 1, 1, tzinfo=timezone.utc),
+                                       hit_count=0))
+        db.session.commit()
+    except IntegrityError:
+        # 同時の初回リクエストは、先に作られた行を使う。
+        db.session.rollback()
+
+
+def take_rate(scope: str, ident: str | None = None, message: str = RATE_MESSAGE) -> None:
+    """確認と加算をDB上の条件付きUPDATE1回で行う。コミットは呼び出し側。超えたらロールバックして断る。
+
+    読み取ってからPythonで足すと、同時の要求が同じ値を書いて回数が失われるため。
+    """
+    if not current_app.config.get("RATELIMIT_ENABLED", True):
+        return
+    key, limit, window = _rate_bucket(scope, ident)
+    now = utcnow()
+    start = now - timedelta(seconds=window)
+    table = RateLimitBucket
+    taken = 0
+    if limit > 0:
+        # 窓が切れていれば、この要求を1回目として窓を作り直す。同時に来ても条件に合うのは1件だけ。
+        taken = db.session.execute(
+            update(table).where(table.bucket_key == key, table.window_started_at <= start)
+            .values(window_started_at=now, hit_count=1)
+        ).rowcount
+        if not taken:
+            taken = db.session.execute(
+                update(table).where(table.bucket_key == key, table.window_started_at > start,
+                                    table.hit_count < limit)
+                .values(hit_count=table.hit_count + 1)
+            ).rowcount
+    if taken != 1:
+        fail("rate_limited", 429, message,
+             action="rate_limited", target_type="rate_limit", target_id=scope)
+
+
 def enforce_rate(scope: str, ident: str | None = None, message: str = RATE_MESSAGE) -> None:
     """scopeごとに回数を数える。identを省くと接続元、"all"ならサイト全体、"user:<id>"ならアカウント単位。"""
     if not current_app.config.get("RATELIMIT_ENABLED", True):
         return
-    limit, window = current_app.config["RATE_LIMITS"][scope]
-    now = utcnow()
-    ident = client_key() if ident is None else ident
-    key = hashlib.sha256(f"{scope}|{ident}".encode()).hexdigest()
-    bucket = db.session.get(RateLimitBucket, key)
-    if bucket is None:
-        try:
-            db.session.add(RateLimitBucket(bucket_key=key, window_started_at=now, hit_count=1))
-            db.session.commit()
-            return
-        except IntegrityError:
-            # 同時の初回リクエストは、先に確定した行を数える。
-            db.session.rollback()
-            bucket = db.session.get(RateLimitBucket, key)
-            if bucket is None:
-                fail("rate_limited", 429, message,
-                     action="rate_limited", target_type="rate_limit", target_id=scope)
-    if bucket.window_started_at + timedelta(seconds=window) <= now:
-        bucket.window_started_at = now
-        bucket.hit_count = 1
-        db.session.commit()
-        return
-    if bucket.hit_count >= limit:
-        fail("rate_limited", 429, message,
-             action="rate_limited", target_type="rate_limit", target_id=scope)
-    bucket.hit_count += 1
+    ensure_rate_bucket(scope, ident)
+    take_rate(scope, ident, message)
     db.session.commit()
 
 

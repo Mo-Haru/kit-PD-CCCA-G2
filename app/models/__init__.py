@@ -71,6 +71,7 @@ from app.models.protection import (
     QrShareVersion,
     QrViewSession,
     RateLimitBucket,
+    ShareQuotaLock,
     SchemaMigration,
     SessionReauth,
     UserEncryptionKey,
@@ -85,7 +86,7 @@ __all__ = [
     "GlossaryTerm", "QuestionGlossaryTerm", "AuditLog", "RecoveryKeyEnvelope",
     "ExternalAccount", "NotificationSetting", "NotificationDelivery", "ShareRecipient",
     "SchemaMigration", "UserEncryptionKey", "UserKeyBundle", "SessionReauth",
-    "RateLimitBucket", "VerifiedContact", "FamilyInvitation", "FamilyConnection",
+    "RateLimitBucket", "ShareQuotaLock", "VerifiedContact", "FamilyInvitation", "FamilyConnection",
     "FamilyShare", "FamilyShareVersion", "FamilyShareOwnerCopy", "QrShare",
     "QrShareVersion", "QrViewSession", "DeviceMigration",
 ]

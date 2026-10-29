@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from flask import current_app
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, update
+from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
-from app.models import FamilyShare, QrShare, utcnow
-from app.services.support import enforce_rate, fail
+from app.models import FamilyShare, QrShare, ShareQuotaLock, utcnow
+from app.services.support import ensure_rate_bucket, fail, take_rate
 
 
 def active_share_count(user_id: str, now=None) -> int:
@@ -30,8 +31,27 @@ def active_share_count(user_id: str, now=None) -> int:
     return qr + family
 
 
+def _lock_quota(user_id: str) -> None:
+    """同じアカウントの枠の確認から作成までを直列にする。ロックは呼び出し側のコミットかロールバックで外れる。
+
+    ロック行のUPDATEを新しいトランザクションの最初の書き込みにする（PostgreSQLは行ロック、SQLiteは書き込みロック）。
+    待っていた要求は、先の要求がコミットした共有を数えてから判断する。
+    """
+    db.session.commit()
+    if db.session.get(ShareQuotaLock, user_id) is None:
+        try:
+            db.session.add(ShareQuotaLock(user_id=user_id, version=0))
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+    db.session.execute(
+        update(ShareQuotaLock).where(ShareQuotaLock.user_id == user_id)
+        .values(version=ShareQuotaLock.version + 1)
+    )
+
+
 def require_capacity(user_id: str) -> None:
-    """有効な共有を1件増やせるか確かめる。作成回数には数えない。"""
+    """有効な共有を1件増やせるか確かめる。作成回数には数えない。ロックを取った後に呼ぶ。"""
     limit = int(current_app.config["SHARE_ACTIVE_LIMIT"])
     if active_share_count(user_id) >= limit:
         fail("share_limit", 409,
@@ -45,11 +65,18 @@ def require_capacity_to_revive(user_id: str, old_expiry, new_expiry, now=None) -
     was_expired = old_expiry is not None and old_expiry <= now
     becomes_active = new_expiry is None or new_expiry > now
     if was_expired and becomes_active:
+        _lock_quota(user_id)
         require_capacity(user_id)
 
 
 def admit_new_share(user_id: str) -> None:
-    """新しい共有を作る前に呼ぶ。上限を超えるときは何も数えずに断る。"""
+    """新しい共有を作る前に呼ぶ。呼び出し側は、共有の追加まで途中でコミットせずに1回でコミットする。
+
+    枠の確認・作成回数の加算・共有の追加が同じトランザクションに入るので、
+    上限で断った作成や、後の検証で失敗した作成は数えない。
+    """
+    ident = f"user:{user_id}"
+    ensure_rate_bucket("share_create", ident)
+    _lock_quota(user_id)
     require_capacity(user_id)
-    enforce_rate("share_create", ident=f"user:{user_id}",
-                 message="共有の作成が多すぎます。時間をおいてやり直してください。")
+    take_rate("share_create", ident, message="共有の作成が多すぎます。時間をおいてやり直してください。")
