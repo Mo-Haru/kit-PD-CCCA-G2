@@ -33,8 +33,16 @@
         <legend>リンクの種類</legend>
         <label><input type="radio" name="mode" value="emergency" checked> 緊急用（最初の閲覧のみ）</label>
         <label><input type="radio" name="mode" value="timed"> 期限付き（最長31日、期限まで複数回閲覧可）</label>
-        <label><input type="radio" name="mode" value="unlimited"> 無期限・複数回（停止するまで閲覧可）</label>
+        <label><input type="radio" name="mode" value="long"> 長期（最長3年、期限まで複数回閲覧可）</label>
       </fieldset>
+      <div id="long-warning" class="demo-notice is-error" role="note" hidden>
+        <p><strong>長期リンクは、期限まで何回でも、誰でも閲覧できます。</strong></p>
+        <ul>
+          <li>リンクやQRコードを手に入れた人は、あなたが停止するまで回答を読めます。人目に触れる場所に置かないでください。</li>
+          <li>期限は最長3年です。期限を過ぎると自動的に無効になり、ずっと残り続けることはありません。</li>
+          <li>不要になったら、期限を待たずに「共有停止」を押してください。相手が保存・撮影した内容は消せません。</li>
+        </ul>
+      </div>
       <div id="expiry-field" class="md-field md-field--raised" hidden>
         <label class="md-field-label" for="expires-at">有効期限</label>
         <input id="expires-at" class="md-field-control" type="datetime-local" disabled>

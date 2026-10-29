@@ -2,7 +2,16 @@ import { api, createQrShare, getUnlockState, loadAnswerDocument, openOwnedQrShar
 import { entriesFromPayload, fillAnswerList, plaintextForSelection, presentAnswer } from "./crypto.mjs";
 import { bindQrShareDialog } from "./qr-share-dialog.mjs";
 
-const modeLabel = mode => ({ emergency: "緊急用（最初の閲覧のみ）", timed: "期限付き", unlimited: "無期限・複数回" }[mode] || mode);
+const modeLabel = mode => ({ emergency: "緊急用（最初の閲覧のみ）", timed: "期限付き", long: "長期（最長3年）" }[mode] || mode);
+// サーバーの上限（QR_TIMED_MAX_SECONDS / QR_LONG_MAX_SECONDS）と同じ日数。
+const MAX_DAYS = { timed: 31, long: 1096 };
+
+export function longExpiryDefault(now = new Date()) {
+  const date = new Date(now.getTime());
+  date.setFullYear(date.getFullYear() + 3);
+  date.setSeconds(0, 0);
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
 
 export function qrConfirmationKey(selection, mode, expiresAt, ownerId) {
   return JSON.stringify({ selection, mode, expiresAt, ownerId });
@@ -23,6 +32,7 @@ export function bindSharingPage(root, client = { api, createQrShare, getUnlockSt
   let encrypted = null;
   let answerDocument = null;
   let detail = null;
+  let shownMode = null;
   const answerViews = [];
   const stateLabel = { active: "有効", stopped: "停止", expired: "期限切れ", used: "使用済み" };
 
@@ -77,10 +87,10 @@ export function bindSharingPage(root, client = { api, createQrShare, getUnlockSt
   function settings() {
     const mode = root.querySelector("input[name=mode]:checked").value;
     let expiresAt = null;
-    if (mode === "timed") {
+    if (mode in MAX_DAYS) {
       const date = new Date(node("expires-at").value);
-      if (!Number.isFinite(date.getTime()) || date <= new Date() || date > new Date(Date.now() + 31 * 86400000)) {
-        throw new Error("有効期限を現在より後、31日以内に指定してください。");
+      if (!Number.isFinite(date.getTime()) || date <= new Date() || date > new Date(Date.now() + MAX_DAYS[mode] * 86400000)) {
+        throw new Error(mode === "long" ? "有効期限を現在より後、3年以内に指定してください。" : "有効期限を現在より後、31日以内に指定してください。");
       }
       expiresAt = date.toISOString();
     }
@@ -91,9 +101,16 @@ export function bindSharingPage(root, client = { api, createQrShare, getUnlockSt
     node("chapters").hidden = scope !== "chapters";
     node("questions").hidden = scope !== "questions";
     node("all-answers").hidden = scope !== "all";
-    const timed = root.querySelector("input[name=mode]:checked").value === "timed";
-    node("expiry-field").hidden = !timed;
-    node("expires-at").disabled = !timed;
+    const mode = root.querySelector("input[name=mode]:checked").value;
+    const expiring = mode in MAX_DAYS;
+    node("expiry-field").hidden = !expiring;
+    node("expires-at").disabled = !expiring;
+    node("long-warning").hidden = mode !== "long";
+    if (mode !== shownMode) {
+      // 長期は上限の3年後を既定にする。期限付きへ戻したら選び直してもらう。
+      node("expires-at").value = mode === "long" ? longExpiryDefault() : "";
+      shownMode = mode;
+    }
   }
   function choice(parent, id, text) {
     const label = root.createElement("label");
@@ -257,7 +274,14 @@ export function bindSharingPage(root, client = { api, createQrShare, getUnlockSt
     facts.textContent = `${modeLabel(chosen.mode)} / 期限 ${chosen.expiresAt ? new Date(chosen.expiresAt).toLocaleString() : "なし"}`;
     const answers = root.createElement("div");
     fillAnswerList(answers, entriesFromPayload(payload, catalog));
-    node("preview-output").replaceChildren(facts, answers);
+    const parts = [facts];
+    if (chosen.mode === "long") {
+      const caution = root.createElement("p");
+      caution.className = "is-error";
+      caution.textContent = "長期リンクです。期限までは、リンクを手に入れた人なら誰でも何回でも閲覧できます。";
+      parts.push(caution);
+    }
+    node("preview-output").replaceChildren(...parts, answers);
     show("内容と期限を確認して、確認欄にチェックしてください。");
   }));
   node("create-qr").addEventListener("click", () => run(async () => {

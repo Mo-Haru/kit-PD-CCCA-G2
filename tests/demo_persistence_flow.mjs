@@ -108,8 +108,12 @@ try {
 
   stage = "family invite / selected encrypted shares / recipient decryption";
   const invitation = await a.api("/api/v1/family/invitations", { method: "POST", body: { kind: "open" } });
-  await use("B").api("/api/v1/family/invitations/request", { method: "POST", body: { token: invitation.token } });
-  const connection = await use("A").api(`/api/v1/family/invitations/${invitation.invitation.id}/confirm`, { method: "POST", body: {} });
+  const requested = await use("B").api("/api/v1/family/invitations/request", { method: "POST", body: { token: invitation.token } });
+  await assert.rejects(use("A").api(`/api/v1/family/invitations/${invitation.invitation.id}/confirm`, { method: "POST", body: {} }),
+    error => error.status === 400);
+  const connection = await use("A").api(`/api/v1/family/invitations/${invitation.invitation.id}/confirm`, {
+    method: "POST", body: { code: requested.confirmation.code },
+  });
   const context = { connectionId: connection.connection_id, recipientUserId: accounts.B.user_id, recipientKeyId: accounts.B.encryption_key_id };
   const saved = await a.loadAnswerDocument();
   const shares = [];
@@ -185,27 +189,36 @@ try {
     start_token: bytesToB64url(shortSecrets.startToken), attempt_id: bytesToB64url(crypto.getRandomValues(new Uint8Array(32))),
   } }), error => error.code === "qr_expired");
 
-  stage = "unlimited link / two viewers / a year later / owner decryption / stop";
+  stage = "long link / two viewers / a year later / owner decryption / closes after three years / stop";
   use("A");
-  const unlimited = await a.createQrShare({ mode: "unlimited", selection, payload: confirmed });
-  const unlimitedSecrets = parseShareFragment(new URL(unlimited.url).hash);
-  privateMarkers.push(bytesToB64url(unlimited.privateKey));
-  assert.equal(unlimited.share.expires_at, null);
+  await assert.rejects(a.createQrShare({ mode: "unlimited", selection, payload: confirmed }), error => error.status === 400);
+  await assert.rejects(a.createQrShare({ mode: "long", selection, payload: confirmed }), error => error.status === 400);
+  const longShare = await a.createQrShare({ mode: "long", selection, payload: confirmed,
+    expiresAt: new Date(Date.parse(clock.now) + 1095 * 86400000).toISOString() });
+  const longSecrets = parseShareFragment(new URL(longShare.url).hash);
+  privateMarkers.push(bytesToB64url(longShare.privateKey));
+  assert.ok(longShare.share.expires_at);
   await rpc("clock", { advance: 366 * 86400 });
   for (const actorName of ["viewer", "other-viewer"]) {
     const receiver = use(actorName);
-    await receiver.api(`/api/v1/qr-shares/${unlimited.share.id}/start`, { method: "POST", body: {
-      start_token: bytesToB64url(unlimitedSecrets.startToken), attempt_id: bytesToB64url(crypto.getRandomValues(new Uint8Array(32))),
+    await receiver.api(`/api/v1/qr-shares/${longShare.share.id}/start`, { method: "POST", body: {
+      start_token: bytesToB64url(longSecrets.startToken), attempt_id: bytesToB64url(crypto.getRandomValues(new Uint8Array(32))),
     } });
     const current = await receiver.api("/api/v1/qr-view/current");
-    assert.equal(current.mode, "unlimited");
+    assert.equal(current.mode, "long");
     assert.ok(!Object.hasOwn(current, "owner_secret"));
-    assert.deepEqual(await openSharedPayload(unlimitedSecrets.privateKey, current, unlimited.share.id), confirmed);
+    assert.deepEqual(await openSharedPayload(longSecrets.privateKey, current, longShare.share.id), confirmed);
   }
   use("A");
-  assert.deepEqual(await a.openOwnedQrShare((await a.api(`/api/v1/qr-shares/${unlimited.share.id}`)).share), confirmed);
-  await a.api(`/api/v1/qr-shares/${unlimited.share.id}/stop`, { method: "POST", body: {} });
-  await assert.rejects(use("other-viewer").api("/api/v1/qr-view/current"), error => error.code === "qr_stopped");
+  assert.deepEqual(await a.openOwnedQrShare((await a.api(`/api/v1/qr-shares/${longShare.share.id}`)).share), confirmed);
+  await rpc("clock", { advance: 730 * 86400 });
+  await assert.rejects(use("viewer").api(`/api/v1/qr-shares/${longShare.share.id}/start`, { method: "POST", body: {
+    start_token: bytesToB64url(longSecrets.startToken), attempt_id: bytesToB64url(crypto.getRandomValues(new Uint8Array(32))),
+  } }), error => error.code === "qr_expired");
+  use("A");
+  assert.equal((await a.api(`/api/v1/qr-shares/${longShare.share.id}`)).share.status, "expired");
+  await a.api(`/api/v1/qr-shares/${longShare.share.id}/stop`, { method: "POST", body: {} });
+  assert.equal((await a.api(`/api/v1/qr-shares/${longShare.share.id}`)).share.status, "stopped");
 
   stage = "database and HTTP plaintext / key checks";
   const evidence = await rpc("evidence");

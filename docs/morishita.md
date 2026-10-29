@@ -10,8 +10,9 @@
 | `/account` | ヘッダー付きのアカウント管理。鍵の解除、パスキーの追加・無効化、ログアウト |
 | `/answers/demo` | ダミー質問6問による暗号化保存・再読み込み・共有テスト |
 | `/sharing` | 共有する内容を確認してリンクを作成・停止する。QR画像は未実装 |
-| `/family` | 家族一覧、リンク・QR招待、承認、共有、登録解除。送信・受信内容はモーダルで表示 |
-| `/family/invite` | ログイン中の名前を確認して招待を承諾する専用画面 |
+| `/family` | 家族一覧、リンク・QR招待、確認コードでの承認、確認コードの再発行、共有、登録解除。送信・受信内容はモーダルで表示 |
+| `/family/invite` | ログイン中の名前を確認して招待を承諾する専用画面。承諾後に確認リンク・QR・確認コードを表示 |
+| `/family/confirm` | 申請者から受け取った確認リンクを、招待した人が開いて本人確認のうえ承認する画面 |
 | `/view/<共有ID>` | QRを読み取った人の閲覧。画像は出さない |
 | `/transfer` | 端末移行 |
 
@@ -122,13 +123,19 @@ try {
 
 ## 家族共有
 
-メール送信機能は接続していません。通常は `POST /api/v1/family/invitations` の `{ "kind": "open" }` を使います。`{ "kind": "email", "email": "..." }` も受け付けますが、検証済みかどうかにかかわらず、形式が正しければ同じ200応答です。未登録のアドレスでは接続を作りません。招待一覧にもメールアドレスや登録有無は出しません。
+招待は `POST /api/v1/family/invitations` の `{ "kind": "open" }` だけです。メール招待（`kind: "email"`）は、招待する人が相手のメールアドレスを知っている必要があり、サーバーにもアドレス由来の照合値が残るため、2026-10-29に停止しました。`kind: "email"` は400 `invalid_invitation`、`POST /api/v1/family/invitations/accept` は削除済みです。既存DBの照合値の列と移行手順 `20261021_contact_hash_hmac` は残しています（`CONTACT_HASH_KEY` は、この移行で旧形式の行を変換するときだけ使います）。保存済み照合値の削除は未実施です。
 
-照合値は `HMAC-SHA256(CONTACT_HASH_KEY, SHA-256(正規化メール))` です。正規化は前後の空白を除き、小文字にします。保存版は `address_hash_version = 2` です。`CONTACT_HASH_KEY` は32バイト以上で、環境変数から読みます。リポジトリやDBには置きません。未設定や短すぎる値では計算せず、メール招待は503 `contact_hash_unconfigured` です。単純なSHA-256には戻しません。秘密を変えると照合結果も変わるため、変えたあとの既存行はそのままでは一致しません。
+招待から家族登録までの流れは次のとおりです。表示名は申請者が自由に付けられるため、表示名だけでは登録しません。
 
-既存のSHA-256行は、`init-db` の手順 `20261021_contact_hash_hmac` が `HMAC-SHA256(CONTACT_HASH_KEY, 保存済みSHA-256)` に置き換え、版を2にします。元のメールが無くても、新しい入力と同じ値になります。置き換え後に古いSHA-256は残しません。秘密が未設定で旧値が残っているときは変換せず失敗します。手順の再実行は、版2の行を変えません。
+1. 招待する人（A）が招待を作ります。応答の `token` は一度だけ返します。リンクは `/family/invite#token=<token>` です。トークンをクエリに付けないでください。ページを開いただけでは招待は消費しません。
+2. 招待を受けた人（B）が `POST /api/v1/family/invitations/request` を送ります。応答の `confirmation` に、Bだけが受け取る確認情報 `{ token, code, confirm_path, expires_at }` が入ります。サーバーにはSHA-256だけを残します。招待一覧APIには出しません。
+3. BはAに、確認リンク `/family/confirm#token=<confirmation.token>`（QRでも可）か、確認コード（`ABCD-EFGH` 形式、紛らわしい 0/O・1/I/L を除いた31種類の文字で8桁）を、対面や電話など本人と確かめられる方法で直接渡します。
+4. Aは次のどちらかで承認します。どちらも15分以内の再認証が必要です。
+   - 確認コード: `POST /api/v1/family/invitations/<id>/confirm` に `{ "code": "ABCD-EFGH" }`。大文字小文字・ハイフン・空白は問いません。不一致は400 `confirmation_mismatch`（応答の `remaining` に残り回数）。5回続けて間違えると、その申請は `cancelled` になり409 `confirmation_locked` です。招待からやり直します。
+   - 確認リンク: `/family/confirm` を開き、「パスキーで本人確認して家族に追加」を押すと `POST /api/v1/family/invitations/confirm-link` に `{ "token": ... }` を送ります。招待したアカウント以外では、招待の有無を区別せず404です。開いただけでは登録しません。
+5. 承認すると接続を作り、確認情報は無効になります。応答は `{ connection_id, recipient_display_name }` です。
 
-応答の `token` は一度だけ返します。リンクは `/family/invite#token=<token>` です。トークンをクエリに付けないでください。ページを開いただけでは招待は消費しません。受信者が `POST /api/v1/family/invitations/request` を送り、招待者が `POST /api/v1/family/invitations/<id>/confirm` するまで接続されません。第三者は同じトークンを使えません。
+Bが確認情報を閉じてしまった場合や、Aがコードを間違えた場合は、Bが `POST /api/v1/family/invitations/<id>/confirmation` で再発行できます（家族画面の「確認コードを再発行」）。前のリンクとコードは使えなくなり、失敗回数は0に戻ります。この変更より前に申請された `awaiting_sender` の招待には確認情報がないため、承認は409 `confirmation_required` になります。Bに再発行してもらってください。列は `init-db` の手順 `20261029_family_invite_confirmation` で追加します。
 
 共有の作成は `POST /api/v1/family/shares` です。`confirmed` が `true` でないと保存しません。`id` はクライアントが作ったUUIDで、暗号のAADに入れます。`recipient_key_id` が相手の現在の有効な鍵と違うときは409 `key_changed` と `current_key_id` を返し、新しい版は作りません。
 
@@ -144,16 +151,16 @@ try {
 
 1. 32バイトのHPKE鍵対と、32バイトの開始トークンを端末で作ります。
 2. 共有IDは32バイトのbase64url（43文字）です。AADに入れるため、作成前に決めます。
-3. `POST /api/v1/qr-shares` に `id`、`mode`（`emergency`、`timed`、`unlimited`）、`public_key`、`start_token_hash`（SHA-256）、`version`（`hpke_enc` と `ciphertext`）、期限付きなら `expires_at` を送ります。`unlimited` は期限なし・複数回で、停止操作は共通です。`private_key` や完全なURLは項目として拒否します。発行者向けの `owner_secret` は暗号文のみを保存し、所有者の一覧・詳細APIだけに返します。閲覧APIには返しません。
+3. `POST /api/v1/qr-shares` に `id`、`mode`（`emergency`、`timed`、`long`）、`public_key`、`start_token_hash`（SHA-256）、`version`（`hpke_enc` と `ciphertext`）、`timed` と `long` では `expires_at` を送ります。`timed` は最長31日、`long` は最長3年（1096日）で、どちらも期限内なら複数回開けます。期限のないリンクは作れません。`unlimited` は2026-10-29に廃止し、400です。既存の `unlimited` は `init-db` の手順 `20261029_long_qr` で、作成から1096日後に切れる `long` に置き換えます。停止操作は共通です。`private_key` や完全なURLは項目として拒否します。発行者向けの `owner_secret` は暗号文のみを保存し、所有者の一覧・詳細APIだけに返します。閲覧APIには返しません。
 4. 表示するURLは `createShareUrl` の形です。`/view/<id>#k=<秘密鍵>&t=<開始トークン>`。
 5. 坂の表示UIは、`createQrShare` が返した `url` だけを画像にします。`privateKey` と `startToken` はサーバーへ送らず、画像の元データにも残しません。`selection` を省くと全体共有にはならず、関数が失敗します。共有前に `plaintextForSelection` で対象だけを確認できます。
 6. 閲覧ページはfragmentを `sessionStorage` に移し、アドレスバーからは消します。初回表示では開始しません。利用者が「内容を開く」を押したときだけ `POST /api/v1/qr-shares/<id>/start` に `start_token` と `attempt_id` を送ります。秘密鍵は送りません。
 7. 成功すると `wn_qr` Cookieが付きます。これはアカウントのセッションではありません。`/api/v1/answers/current` には使えません。
 8. 同じ共有の有効なセッションがある再読込は `GET /api/v1/qr-view/current` だけで復号します。通常の再表示では新しい start を呼びません。別の共有のセッションでは復号しません。閲覧画面は共有内容、`updated_at`（共有の更新日時）、有効状態（有効・停止・期限切れ・使用済み）、終了操作を分けて出します。使用済み、期限切れ、停止、閲覧期限切れ、復号失敗は別の文言です。復号に失敗したときは内容を出しません。
-9. 緊急用は最初の成功したattemptだけがセッションを得ます。同じattemptの再送は、無操作期限と絶対期限の内側なら同じセッションです。別のattemptは409です。期限付きは、QR自体の期限内なら複数のセッションを作れます。
-10. 閲覧の絶対期限は30分で、再取得しても再試行しても延びません。5分操作が無いとアイドル期限で切れます。切れたセッションは同じattemptでは復活しません。緊急用は消費済みのままなので、その後の新しいattemptも拒否します。期限付きは、QR自体が有効なら新しいattemptで別セッションを始められます。
+9. 緊急用は最初の成功したattemptだけがセッションを得ます。同じattemptの再送は、無操作期限と絶対期限の内側なら同じセッションです。別のattemptは409です。期限付き・長期は、QR自体の期限内なら複数のセッションを作れます。
+10. 閲覧の絶対期限は30分で、再取得しても再試行しても延びません。5分操作が無いとアイドル期限で切れます。切れたセッションは同じattemptでは復活しません。緊急用は消費済みのままなので、その後の新しいattemptも拒否します。期限付き・長期は、QR自体が有効なら新しいattemptで別セッションを始められます。
 11. 更新は `POST /api/v1/qr-shares/<id>/update` です。緊急用を消費したあとも、同じ鍵対で新しい版を復号できます。消費時刻は戻りません。更新時の `selection` が狭ければ、新しい暗号文からも非対象は消えます。
-12. 停止は `POST /api/v1/qr-shares/<id>/stop`、期限付きの期限変更は `POST /api/v1/qr-shares/<id>/expiry` です。発行済みセッションの次の取得にも反映されます。相手が保存済みの内容は消えません。
+12. 停止は `POST /api/v1/qr-shares/<id>/stop`、期限付き・長期の期限変更は `POST /api/v1/qr-shares/<id>/expiry` です（それぞれ上限は同じ）。発行済みセッションの次の取得にも反映されます。相手が保存済みの内容は消えません。
 
 ## 端末移行
 

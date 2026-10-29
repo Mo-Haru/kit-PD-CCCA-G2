@@ -344,14 +344,21 @@ def connect_pair(app, owner_client, owner_passkey, recipient_name, recipient_pub
     recipient_passkey, recipient_body, _public = register(
         recipient, recipient_name, public_key=recipient_public,
     )
+    connection_id = invite_and_confirm(owner_client, recipient)
+    return recipient, recipient_passkey, recipient_body, connection_id
+
+
+def invite_and_confirm(owner_client, recipient):
+    """招待→申請→申請者が受け取った確認コードで、招待した人が承認する。"""
     invited = post(owner_client, "/api/v1/family/invitations", {"kind": "open"})
     assert invited.status_code == 200, invited.get_json()
-    token = invited.get_json()["token"]
-    assert post(recipient, "/api/v1/family/invitations/request", {"token": token}).status_code == 200
+    requested = post(recipient, "/api/v1/family/invitations/request", {"token": invited.get_json()["token"]})
+    assert requested.status_code == 200, requested.get_json()
     invitation_id = invited.get_json()["invitation"]["id"]
-    confirmed = post(owner_client, f"/api/v1/family/invitations/{invitation_id}/confirm")
+    code = requested.get_json()["confirmation"]["code"]
+    confirmed = post(owner_client, f"/api/v1/family/invitations/{invitation_id}/confirm", {"code": code})
     assert confirmed.status_code == 200, confirmed.get_json()
-    return recipient, recipient_passkey, recipient_body, confirmed.get_json()["connection_id"]
+    return confirmed.get_json()["connection_id"]
 
 
 def test_family_invitation_is_single_use_and_confirmed(client, app):
@@ -369,45 +376,11 @@ def test_family_invitation_is_single_use_and_confirmed(client, app):
     assert reused.status_code == 400
     assert connection_id
     assert bob_body["user_id"] != owner["user_id"]
-    from app.contact_hash import HASH_VERSION, address_hmac
-    unknown_email = "missing@example.test"
-    email = "family@example.test"
-    with app.app_context():
-        db.session.add(VerifiedContact(
-            user_id=bob_body["user_id"], kind="email",
-            address_hash=address_hmac(email), address_hash_version=HASH_VERSION,
-        ))
-        db.session.commit()
-        connections_before = db.session.query(FamilyConnection).count()
-    unknown = post(client, "/api/v1/family/invitations", {"kind": "email", "email": unknown_email})
-    emailed = post(client, "/api/v1/family/invitations", {"kind": "email", "email": "Family@Example.test"})
-    assert unknown.status_code == emailed.status_code == 200
-    unknown_body = unknown.get_json()
-    emailed_body = emailed.get_json()
-    assert set(unknown_body) == set(emailed_body) == {"invitation", "token", "invite_path"}
-    assert set(unknown_body["invitation"]) == set(emailed_body["invitation"])
-    assert unknown_body["invitation"]["kind"] == emailed_body["invitation"]["kind"] == "email"
-    assert unknown_body["invitation"]["status"] == emailed_body["invitation"]["status"] == "pending"
-    assert unknown_body["invitation"]["recipient_display_name"] == emailed_body["invitation"]["recipient_display_name"]
-    listed = client.get("/api/v1/family/invitations").get_json()["invitations"]
-    email_rows = [row for row in listed if row["kind"] == "email"]
-    assert len(email_rows) == 2
-    assert {row["status"] for row in email_rows} == {"pending"}
-    assert {row["recipient_display_name"] for row in email_rows} == {None}
-    combined = unknown.get_data(as_text=True) + emailed.get_data(as_text=True) + client.get("/api/v1/family/invitations").get_data(as_text=True)
-    assert unknown_email not in combined and email not in combined and "Family@Example.test" not in combined
-    denied = post(outsider, "/api/v1/family/invitations/accept", {"token": emailed_body["token"]})
-    assert denied.status_code == 403
-    wrong = post(bob, "/api/v1/family/invitations/accept", {"token": unknown_body["token"]})
-    assert wrong.status_code == 403
-    assert wrong.get_json()["error"] == denied.get_json()["error"] == "recipient_mismatch"
-    accepted = post(bob, "/api/v1/family/invitations/accept", {"token": emailed_body["token"]})
-    assert accepted.status_code == 409
-    assert accepted.get_json()["error"] == "already_connected"
-    with app.app_context():
-        assert db.session.query(FamilyConnection).count() == connections_before
-        stored = db.session.query(VerifiedContact).filter_by(user_id=bob_body["user_id"]).one().address_hash
-        assert stored != hashlib.sha256(email.encode()).digest()
+    for body in ({"kind": "email", "email": "family@example.test"}, {"kind": "other"}):
+        refused = post(client, "/api/v1/family/invitations", body)
+        assert refused.status_code == 400
+        assert refused.get_json()["error"] == "invalid_invitation"
+    assert post(bob, "/api/v1/family/invitations/accept", {"token": "x" * 43}).status_code in {404, 405}
     assert invited["status"] in {"accepted", "pending", "awaiting_sender"}
 
 
@@ -888,11 +861,7 @@ def test_family_expiry_disconnect_and_reconnect_keeps_old_share_stopped(client, 
     assert post(recipient, f"/api/v1/family/connections/{connection_id}/disconnect").status_code == 200
     assert recipient.get(f"/api/v1/family/received/{share_id}").status_code == 404
     assert client.get(f"/api/v1/family/shares/{share_id}/history").status_code == 200
-    invited = post(client, "/api/v1/family/invitations", {"kind": "open"})
-    assert invited.status_code == 200, invited.get_json()
-    assert post(recipient, "/api/v1/family/invitations/request", {"token": invited.get_json()["token"]}).status_code == 200
-    confirmed = post(client, f"/api/v1/family/invitations/{invited.get_json()['invitation']['id']}/confirm")
-    assert confirmed.status_code == 200, confirmed.get_json()
+    invite_and_confirm(client, recipient)
     assert recipient.get(f"/api/v1/family/received/{share_id}").status_code == 404
 
 
@@ -995,9 +964,7 @@ def test_key_pending_stops_delivery_until_reencrypted(client, app):
         assert db.session.get(FamilyShare, expired_id).status == "key_pending"
     assert post(recipient, f"/api/v1/family/connections/{connection_id}/disconnect").status_code == 200
     assert recipient.get(f"/api/v1/family/received/{share_id}").status_code == 404
-    invited = post(client, "/api/v1/family/invitations", {"kind": "open"})
-    assert post(recipient, "/api/v1/family/invitations/request", {"token": invited.get_json()["token"]}).status_code == 200
-    assert post(client, f"/api/v1/family/invitations/{invited.get_json()['invitation']['id']}/confirm").status_code == 200
+    invite_and_confirm(client, recipient)
     assert recipient.get(f"/api/v1/family/received/{share_id}").status_code == 404
     assert recipient.get(f"/api/v1/family/received/{stopped_id}").status_code == 404
     assert recipient.get(f"/api/v1/family/received/{expired_id}").status_code == 404
@@ -1055,8 +1022,8 @@ def test_email_hash_migration_and_missing_secret(client, app):
         assert address_hmac(normalized) != stored
         app.config["CONTACT_HASH_KEY"] = None
     missing = post(client, "/api/v1/family/invitations", {"kind": "email", "email": "nobody@example.test"})
-    assert missing.status_code == 503
-    assert missing.get_json()["error"] == "contact_hash_unconfigured"
+    assert missing.status_code == 400
+    assert missing.get_json()["error"] == "invalid_invitation"
     assert "nobody@example.test" not in missing.get_data(as_text=True)
     with app.app_context():
         leaked = hashlib.sha256(b"nobody@example.test").digest()

@@ -256,3 +256,42 @@
     gap: 0.1rem;
   }
 }
+
+/* 長期QRの注意と、家族登録の確認コード */
+.sensitive .demo-notice.is-error,
+.sensitive .review-output .is-error {
+  background: #fff2f3;
+  border: 1px solid #d6a8b0;
+  color: #932536;
+}
+
+.sensitive .review-output .is-error {
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+}
+
+.sensitive .demo-notice.is-error ul {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.sensitive .confirmation-code {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 1.5rem;
+  letter-spacing: 0.12em;
+}
+
+.sensitive #confirmation-qr {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.sensitive #confirmation-qr:not([src]) {
+  display: none;
+}

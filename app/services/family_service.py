@@ -11,7 +11,6 @@ from flask import current_app
 from sqlalchemy import or_, update
 from sqlalchemy.exc import IntegrityError
 
-from app.contact_hash import HASH_VERSION, ContactHashKeyError, address_hmac
 from app.crypto_contract import CRYPTO_VERSION, HPKE_SUITE
 from app.extensions import db
 from app.models import (
@@ -39,7 +38,10 @@ from app.services.support import (
 )
 
 OPEN_FIELDS = {"kind"}
-EMAIL_FIELDS = {"kind", "email"}
+# 紛らわしい 0/O、1/I/L を除いた31文字。8文字で約39ビット。
+CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+CODE_LENGTH = 8
+CONFIRM_PATH = "/family/confirm"
 SHARE_FIELDS = {"id", "connection_id", "recipient_key_id", "expires_at", "confirmed", "version", "owner_copy"}
 UPDATE_FIELDS = {"expected_version", "recipient_key_id", "confirmed", "version", "owner_copy"}
 
@@ -81,16 +83,10 @@ def create_invitation(body: dict) -> dict:
     enforce_rate("invite")
     user, session_row, _passkey = load_login()
     require_reauth(session_row)
-    kind = body.get("kind")
-    if kind == "open":
-        expect_fields(body, OPEN_FIELDS)
-        address = None
-    elif kind == "email":
-        expect_fields(body, EMAIL_FIELDS)
-        # 登録の有無で応答を分けない。未登録でも接続は作らず、同じ形の招待だけを返す。
-        address = _email_hash(body.get("email"))
-    else:
+    # メール招待は相手のアドレスを知る必要があり、照合値もサーバーに残るため受け付けない。
+    if body.get("kind") != "open":
         fail("invalid_invitation", 400, "招待の種類が正しくありません。", actor_id=user.id)
+    expect_fields(body, OPEN_FIELDS)
     pending = db.session.query(FamilyInvitation).filter(
         FamilyInvitation.sender_user_id == user.id,
         FamilyInvitation.status.in_(("pending", "awaiting_sender")),
@@ -101,10 +97,8 @@ def create_invitation(body: dict) -> dict:
     token = secrets.token_bytes(32)
     row = FamilyInvitation(
         sender_user_id=user.id,
-        kind=kind,
+        kind="open",
         token_hash=hashlib.sha256(token).digest(),
-        address_hash=address,
-        address_hash_version=None if address is None else HASH_VERSION,
         status="pending",
         expires_at=now + timedelta(seconds=int(current_app.config["INVITATION_TTL_SECONDS"])),
         created_at=now,
@@ -117,23 +111,6 @@ def create_invitation(body: dict) -> dict:
         "token": b64encode(token),
         "invite_path": "/family/invite",
     }
-
-
-def _email_hash(value) -> bytes:
-    try:
-        return address_hmac(value)
-    except ValueError:
-        fail("invalid_email", 400, "メールアドレスの形式が正しくありません。")
-    except ContactHashKeyError:
-        fail("contact_hash_unconfigured", 503, "メール照合の設定が未完了です。")
-
-
-def _owner_of_email(digest: bytes) -> str | None:
-    from app.models import VerifiedContact
-    row = db.session.query(VerifiedContact).filter_by(
-        kind="email", address_hash=digest, address_hash_version=HASH_VERSION,
-    ).one_or_none()
-    return None if row is None else row.user_id
 
 
 def list_invitations() -> dict:
@@ -163,6 +140,34 @@ def _by_token(token: str) -> FamilyInvitation:
     return row
 
 
+def _code_hash(invitation_id: str, code: str) -> bytes:
+    return hashlib.sha256(f"acp/family-confirm-code/v1|{invitation_id}|{code}".encode()).digest()
+
+
+def _normalize_code(value) -> str | None:
+    if not isinstance(value, str):
+        return None
+    code = value.replace("-", "").replace(" ", "").upper()
+    if len(code) != CODE_LENGTH or any(char not in CODE_ALPHABET for char in code):
+        return None
+    return code
+
+
+def _issue_confirmation(row: FamilyInvitation) -> dict:
+    """申請した人だけに返す。サーバーにはハッシュだけを残し、前の確認情報は無効にする。"""
+    token = secrets.token_bytes(32)
+    code = "".join(secrets.choice(CODE_ALPHABET) for _ in range(CODE_LENGTH))
+    row.confirm_token_hash = hashlib.sha256(token).digest()
+    row.confirm_code_hash = _code_hash(row.id, code)
+    row.confirm_failures = 0
+    return {
+        "token": b64encode(token),
+        "code": f"{code[:4]}-{code[4:]}",
+        "confirm_path": CONFIRM_PATH,
+        "expires_at": iso(row.expires_at),
+    }
+
+
 def request_open_invitation(body: dict) -> dict:
     from app.services.support import enforce_rate
     enforce_rate("invite")
@@ -175,42 +180,101 @@ def request_open_invitation(body: dict) -> dict:
         fail("invitation_invalid", 400, "この招待は使えません。", actor_id=user.id)
     row.status = "awaiting_sender"
     row.recipient_user_id = user.id
+    confirmation = _issue_confirmation(row)
     audit("invitation_requested", "invitation", row.id, "success", actor_id=user.id)
     db.session.commit()
-    return {"invitation": _invitation_view(row, user.id)}
+    return {"invitation": _invitation_view(row, user.id), "confirmation": confirmation}
 
 
-def accept_email_invitation(body: dict) -> dict:
+def reissue_confirmation(invitation_id: str) -> dict:
+    """申請した人が確認リンクとコードを作り直す。画面を閉じた後や、コードを間違えられた後に使う。"""
+    from app.services.support import enforce_rate
+    enforce_rate("invite")
+    user, _session, _passkey = load_login()
+    row = db.session.get(FamilyInvitation, invitation_id)
+    if row is None or row.recipient_user_id != user.id:
+        fail("not_found", 404, "招待が見つかりません。", actor_id=user.id)
+    _expire_invitation(row)
+    if row.status != "awaiting_sender":
+        db.session.commit()
+        fail("invitation_invalid", 400, "確認待ちの申請ではありません。", actor_id=user.id)
+    confirmation = _issue_confirmation(row)
+    audit("invitation_confirmation_issued", "invitation", row.id, "success", actor_id=user.id)
+    db.session.commit()
+    return {"invitation": _invitation_view(row, user.id), "confirmation": confirmation}
+
+
+def _awaiting_confirmation(row: FamilyInvitation | None, user_id: str) -> FamilyInvitation:
+    if row is None or row.sender_user_id != user_id:
+        fail("not_found", 404, "招待が見つかりません。", actor_id=user_id)
+    _expire_invitation(row)
+    if row.status != "awaiting_sender" or row.recipient_user_id is None:
+        db.session.commit()
+        fail("invitation_invalid", 400, "承認待ちの招待ではありません。", actor_id=user_id)
+    if row.confirm_token_hash is None or row.confirm_code_hash is None:
+        fail("confirmation_required", 409,
+             "この申請には確認コードがありません。申請した家族に、家族画面で確認コードを再発行してもらってください。",
+             actor_id=user_id)
+    return row
+
+
+def _finish_confirmation(row: FamilyInvitation, user_id: str) -> dict:
+    connection = _connect(row, row.recipient_user_id)
+    row.confirm_token_hash = None
+    row.confirm_code_hash = None
+    audit("invitation_confirmed", "connection", connection.id, "success", actor_id=user_id)
+    db.session.commit()
+    recipient = db.session.get(User, row.recipient_user_id)
+    return {"connection_id": connection.id,
+            "recipient_display_name": None if recipient is None else recipient.display_name}
+
+
+def confirm_invitation(invitation_id: str, body: dict) -> dict:
+    """招待した人が、申請した家族から受け取った確認コードで承認する。"""
+    expect_fields(body, {"code"})
+    user, session_row, _passkey = load_login()
+    require_reauth(session_row)
+    row = _awaiting_confirmation(db.session.get(FamilyInvitation, invitation_id), user.id)
+    code = _normalize_code(body.get("code"))
+    if code is None or not secrets.compare_digest(_code_hash(row.id, code), row.confirm_code_hash):
+        limit = int(current_app.config["FAMILY_CONFIRM_MAX_FAILURES"])
+        row.confirm_failures = (row.confirm_failures or 0) + 1
+        if row.confirm_failures >= limit:
+            row.status = "cancelled"
+            row.resolved_at = utcnow()
+            row.confirm_token_hash = None
+            row.confirm_code_hash = None
+            audit("invitation_confirmation_locked", "invitation", row.id, "failure", "confirmation_locked", user.id)
+            db.session.commit()
+            fail("confirmation_locked", 409,
+                 "確認コードを続けて間違えたため、この申請を無効にしました。招待からやり直してください。",
+                 actor_id=user.id)
+        remaining = limit - row.confirm_failures
+        audit("invitation_confirmation_mismatch", "invitation", row.id, "failure", "confirmation_mismatch", user.id)
+        db.session.commit()
+        fail("confirmation_mismatch", 400,
+             f"確認コードが一致しません。あと{remaining}回間違えると、この申請は無効になります。",
+             actor_id=user.id, details={"remaining": remaining})
+    return _finish_confirmation(row, user.id)
+
+
+def confirm_invitation_link(body: dict) -> dict:
+    """招待した人が、申請した家族から受け取った確認リンクを開いて承認する。"""
     from app.services.support import enforce_rate
     enforce_rate("invite")
     expect_fields(body, {"token"})
-    user, _session, _passkey = load_login()
-    row = _by_token(body.get("token"))
-    if row.kind != "email" or row.status != "pending" or row.address_hash is None:
-        fail("invitation_invalid", 400, "この招待は使えません。", actor_id=user.id)
-    owner_id = _owner_of_email(row.address_hash)
-    if owner_id is None or owner_id != user.id or row.sender_user_id == user.id:
-        fail("recipient_mismatch", 403, "この招待を受けられるアカウントではありません。",
-             action="invitation_accept", target_type="invitation", target_id=row.id, actor_id=user.id)
-    connection = _connect(row, user.id)
-    audit("invitation_accepted", "connection", connection.id, "success", actor_id=user.id)
-    db.session.commit()
-    return {"connection_id": connection.id}
-
-
-def confirm_invitation(invitation_id: str) -> dict:
     user, session_row, _passkey = load_login()
     require_reauth(session_row)
-    row = db.session.get(FamilyInvitation, invitation_id)
-    if row is None or row.sender_user_id != user.id:
-        fail("not_found", 404, "招待が見つかりません。", actor_id=user.id)
-    _expire_invitation(row)
-    if row.status != "awaiting_sender" or row.recipient_user_id is None:
-        fail("invitation_invalid", 400, "承認待ちの招待ではありません。", actor_id=user.id)
-    connection = _connect(row, row.recipient_user_id)
-    audit("invitation_confirmed", "connection", connection.id, "success", actor_id=user.id)
-    db.session.commit()
-    return {"connection_id": connection.id}
+    try:
+        raw = b64decode(body.get("token"), exact=32)
+    except Exception:
+        fail("invitation_invalid", 400, "確認リンクを確認できません。", actor_id=user.id)
+    row = db.session.query(FamilyInvitation).filter_by(
+        confirm_token_hash=hashlib.sha256(raw).digest(),
+    ).one_or_none()
+    # 別のアカウントで開いた場合も、招待の有無を区別しない。
+    row = _awaiting_confirmation(row, user.id)
+    return _finish_confirmation(row, user.id)
 
 
 def _connect(row: FamilyInvitation, recipient_id: str) -> FamilyConnection:

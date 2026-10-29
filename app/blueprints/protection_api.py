@@ -132,14 +132,19 @@ def invitation_request():
     return _ok(family_service.request_open_invitation(json_body()))
 
 
-@bp.post("/api/v1/family/invitations/accept")
-def invitation_accept():
-    return _ok(family_service.accept_email_invitation(json_body()))
+@bp.post("/api/v1/family/invitations/confirm-link")
+def invitation_confirm_link():
+    return _ok(family_service.confirm_invitation_link(json_body()))
 
 
 @bp.post("/api/v1/family/invitations/<invitation_id>/confirm")
 def invitation_confirm(invitation_id):
-    return _ok(family_service.confirm_invitation(invitation_id))
+    return _ok(family_service.confirm_invitation(invitation_id, json_body()))
+
+
+@bp.post("/api/v1/family/invitations/<invitation_id>/confirmation")
+def invitation_reissue(invitation_id):
+    return _ok(family_service.reissue_confirmation(invitation_id))
 
 
 @bp.post("/api/v1/family/invitations/<invitation_id>/reject")

@@ -102,11 +102,22 @@ def _view(share: QrShare, version: QrShareVersion | None = None, *, owner=False)
     return result
 
 
+MAX_SECONDS = {"timed": "QR_TIMED_MAX_SECONDS", "long": "QR_LONG_MAX_SECONDS"}
+
+
+def _expired(share: QrShare, now) -> bool:
+    return share.mode in MAX_SECONDS and (share.expires_at is None or share.expires_at <= now)
+
+
+def _latest_expiry(mode: str, now):
+    return now + timedelta(seconds=int(current_app.config[MAX_SECONDS[mode]]))
+
+
 def _status(share: QrShare, now=None) -> str:
     now = now or utcnow()
     if share.stopped_at is not None:
         return "stopped"
-    if share.mode == "timed" and (share.expires_at is None or share.expires_at <= now):
+    if _expired(share, now):
         return "expired"
     if share.mode == "emergency" and share.consumed_at is not None:
         return "used"
@@ -119,15 +130,15 @@ def create_share(body: dict) -> dict:
     expect_fields(body, CREATE_FIELDS)
     mode = body.get("mode")
     now = utcnow()
-    if mode in {"emergency", "unlimited"}:
+    if mode == "emergency":
         if body.get("expires_at") is not None:
-            fail("invalid_time", 400, "この種類のリンクに期限は設定できません。", actor_id=user.id)
+            fail("invalid_time", 400, "緊急用QRに期限は設定できません。", actor_id=user.id)
         expires = None
-    elif mode == "timed":
+    elif mode in MAX_SECONDS:
+        # 長期も含め、期限のないリンクは作らない。
         expires = parse_iso(body.get("expires_at"))
-        latest = now + timedelta(seconds=int(current_app.config["QR_TIMED_MAX_SECONDS"]))
-        if expires <= now or expires > latest:
-            fail("invalid_time", 400, "期限付きQRの期限が範囲外です。", actor_id=user.id)
+        if expires <= now or expires > _latest_expiry(mode, now):
+            fail("invalid_time", 400, "QRの期限が範囲外です。", actor_id=user.id)
     else:
         fail("invalid_mode", 400, "QRの種類が正しくありません。", actor_id=user.id)
     share_id = _share_id(body.get("id") or new_share_id())
@@ -188,7 +199,7 @@ def update_share(share_id: str, body: dict) -> dict:
     now = utcnow()
     if share.stopped_at is not None:
         fail("qr_stopped", 409, "停止したQRは更新できません。", actor_id=user.id)
-    if share.mode == "timed" and (share.expires_at is None or share.expires_at <= now):
+    if _expired(share, now):
         fail("qr_expired", 409, "期限が切れたQRは更新できません。", actor_id=user.id)
     if body.get("expected_version") != share.current_version:
         fail("revision_conflict", 409, "別の版があるため更新できません。", actor_id=user.id)
@@ -225,15 +236,14 @@ def change_expiry(share_id: str, body: dict) -> dict:
     require_reauth(session_row)
     expect_fields(body, EXPIRY_FIELDS)
     share = _owned(share_id, user.id)
-    if share.mode != "timed":
-        fail("invalid_mode", 400, "期限を変更できるのは期限付きリンクだけです。", actor_id=user.id)
+    if share.mode not in MAX_SECONDS:
+        fail("invalid_mode", 400, "緊急用QRの期限は変更できません。", actor_id=user.id)
     if body.get("expected_version") != share.current_version:
         fail("revision_conflict", 409, "別の版があるため変更できません。", actor_id=user.id)
     expires = parse_iso(body.get("expires_at"))
     if expires <= share.created_at:
         fail("invalid_time", 400, "期限は作成時刻より後にしてください。", actor_id=user.id)
-    latest = utcnow() + timedelta(seconds=int(current_app.config["QR_TIMED_MAX_SECONDS"]))
-    if expires > latest:
+    if expires > _latest_expiry(share.mode, utcnow()):
         fail("invalid_time", 400, "期限付きQRの期限が範囲外です。", actor_id=user.id)
     share.expires_at = expires
     audit("qr_expiry_changed", "qr_share", share.id, "success", actor_id=user.id)
@@ -260,7 +270,7 @@ def _reject_closed_share(share: QrShare, now) -> None:
     if share.stopped_at is not None:
         fail("qr_stopped", 403, "このQRは停止されています。",
              action="qr_start", target_type="qr_share", target_id=share.id)
-    if share.mode == "timed" and (share.expires_at is None or share.expires_at <= now):
+    if _expired(share, now):
         fail("qr_expired", 403, "このQRの期限が切れています。",
              action="qr_start", target_type="qr_share", target_id=share.id)
 
@@ -369,7 +379,7 @@ def current_view() -> dict:
     share = db.session.get(QrShare, session_row.qr_share_id)
     if share is None or share.stopped_at is not None:
         fail("qr_stopped", 403, "このQRは停止されています。")
-    if share.mode == "timed" and (share.expires_at is None or share.expires_at <= now):
+    if _expired(share, now):
         fail("qr_expired", 403, "このQRの期限が切れています。")
     idle_at = now + timedelta(seconds=int(current_app.config["QR_VIEW_IDLE_SECONDS"]))
     session_row.idle_expires_at = idle_at if idle_at < session_row.absolute_expires_at else session_row.absolute_expires_at

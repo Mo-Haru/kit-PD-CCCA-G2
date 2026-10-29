@@ -15,9 +15,10 @@
     </div>
     <div id="invite-confirmation" hidden>
       <h2>招待を承諾しますか？</h2>
-      <p>承諾後、招待した方が確認すると家族として登録されます。回答の共有範囲は、登録後にそれぞれが選択します。</p>
+      <p>承諾すると、確認リンク・QRコードと確認コードが表示されます。それを招待した方に直接渡し、招待した方が開くか入力すると家族として登録されます。回答の共有範囲は、登録後にそれぞれが選択します。</p>
       <button id="accept-invitation" class="button-primary" type="button" disabled>招待を承諾する</button>
     </div>
+    {% include "family/_confirmation.html" %}
     <p><a href="{{ url_for('protection_pages.family') }}">家族画面へ</a></p>
   </section>
   <script type="module" src="{{ url_for('static', filename='js/watashi/family-invitation.mjs') }}"></script>
