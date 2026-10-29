@@ -196,3 +196,47 @@ def test_share_creation_is_rate_limited_per_account(app, client):
     other = app.test_client()
     _p2, other_body, _pub2 = register(other, "別の人")
     assert create_qr(other, other_body["user_id"])[0].status_code == 200
+
+
+def expire(app, model, share_id):
+    with app.app_context():
+        row = db.session.get(model, share_id)
+        row.created_at = utcnow() - timedelta(days=2)
+        row.expires_at = utcnow() - timedelta(minutes=1)
+        db.session.commit()
+
+
+def test_reviving_an_expired_share_needs_a_free_slot(app, client):
+    from app.models import FamilyShare
+
+    with app.app_context():
+        db.create_all()
+    _passkey, owner, _public = register(client, "延長する人")
+    family_public, _ = hpke_keypair()
+    _family, _p, family_body, connection_id = connect_pair(app, client, None, "家族", family_public)
+    shared, family_id, _aad = share_payload(client, connection_id, family_body["user_id"],
+                                            family_body["encryption_key_id"], family_public, b"{}")
+    assert shared.status_code == 200
+    ids = [create_qr(client, owner["user_id"], "timed")[1] for _ in range(19)]
+    # 期限切れで空いた枠に、新しい共有を作る。
+    expire(app, QrShare, ids[0])
+    expire(app, FamilyShare, family_id)
+    assert create_qr(client, owner["user_id"])[0].status_code == 200
+    assert create_qr(client, owner["user_id"])[0].status_code == 200
+    assert create_qr(client, owner["user_id"])[0].status_code == 409
+    later = stamp(utcnow() + timedelta(days=3))
+    # 期限切れの共有を延長・無期限化して20件を超えることはできない。
+    revived = post(client, f"/api/v1/qr-shares/{ids[0]}/expiry", {"expected_version": 1, "expires_at": later})
+    assert revived.status_code == 409
+    assert revived.get_json()["error"] == "share_limit"
+    for body in ({"expires_at": later}, {"expires_at": None}):
+        family_revived = post(client, f"/api/v1/family/shares/{family_id}/expiry", body)
+        assert family_revived.status_code == 409, body
+    # 有効なままの共有の期限変更は、上限に関係なくできる。
+    assert post(client, f"/api/v1/qr-shares/{ids[1]}/expiry", {"expected_version": 1, "expires_at": later}).status_code == 200
+    # 枠が空けば延長でき、作成回数には数えない。
+    limits(app, share_create=(0, DAY))
+    assert post(client, f"/api/v1/qr-shares/{ids[2]}/stop").status_code == 200
+    assert post(client, f"/api/v1/qr-shares/{ids[0]}/expiry", {"expected_version": 1, "expires_at": later}).status_code == 200
+    assert post(client, f"/api/v1/qr-shares/{ids[3]}/stop").status_code == 200
+    assert post(client, f"/api/v1/family/shares/{family_id}/expiry", {"expires_at": None}).status_code == 200
