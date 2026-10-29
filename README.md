@@ -364,6 +364,8 @@ push のあと、GitHub のリポジトリページで **Compare & pull request*
 | `testing` | `pytest` が使うインメモリ SQLite。開発用 DB ファイルは使わない |
 | `production` | 未決定。この値では起動しない |
 
+リバースプロキシ（nginx や Cloudflare など）の後ろで動かすときは、`.env` の `TRUSTED_PROXY_COUNT` に手前のプロキシの段数を書きます。回数制限で利用者ごとの接続元を数えるためです。直接受ける開発サーバーでは設定しません（詳しくは [森下担当の契約](docs/morishita.md) の「大量作成への対策」）。
+
 開発用 DB を別の場所にするときは、`.env` の `DATABASE_URL` に SQLAlchemy の接続文字列を書きます。空欄のままにすると、暫定の SQLite を使います。SQLite 以外へ変えても、本番 DB が決まったことにはなりません。
 
 `.env` を変えたあとは、起動中のサーバーを止めて、もう一度起動してください。

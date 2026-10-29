@@ -25,6 +25,7 @@ from app.models import (
     UserEncryptionKey,
     utcnow,
 )
+from app.services.share_quota import admit_new_share
 from app.services.support import (
     audit,
     b64decode,
@@ -354,6 +355,7 @@ def create_share(body: dict) -> dict:
     require_reauth(session_row)
     expect_fields(body, SHARE_FIELDS)
     _require_confirmed(body)
+    admit_new_share(user.id)
     try:
         share_id = str(uuid.UUID(body.get("id")))
     except (TypeError, ValueError):

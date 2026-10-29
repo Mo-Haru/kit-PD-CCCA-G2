@@ -30,6 +30,20 @@ def contact_hash_key_from_environ():
     return value or None
 
 
+def proxy_count_from_environ() -> int:
+    """手前のプロキシの段数。未設定・不正値は0（転送ヘッダーを信用しない）。"""
+    value = os.environ.get("TRUSTED_PROXY_COUNT", "").strip()
+    if not value:
+        return 0
+    try:
+        count = int(value)
+    except ValueError as exc:
+        raise RuntimeError("TRUSTED_PROXY_COUNT は0以上の整数で指定してください。") from exc
+    if count < 0 or count > 5:
+        raise RuntimeError("TRUSTED_PROXY_COUNT は0〜5で指定してください。")
+    return count
+
+
 class BaseConfig:
     SECRET_KEY = env_or("SECRET_KEY", "dev-change-me")
     # メール照合用。未設定なら None。開発用の固定秘密にはしない。
@@ -58,7 +72,16 @@ class BaseConfig:
         "invite": (20, 60 * 60),
         "qr_start": (30, 10 * 60),
         "migration": (10, 60 * 60),
+        # 新規登録は検証に成功した分だけ数える。接続元ごとと、サイト全体の両方で止める。
+        "register": (5, 24 * 60 * 60),
+        "register_global": (100, 60 * 60),
+        # 共有（QR・家族）の新規作成。アカウントごとに数え、作成と停止の繰り返しも抑える。
+        "share_create": (60, 24 * 60 * 60),
     }
+    # 1アカウントが同時に持てる有効な共有（QRと家族共有の合計）。停止・期限切れ・使用済みは数えない。
+    SHARE_ACTIVE_LIMIT = 20
+    # アプリの手前にあるリバースプロキシの段数。0ならX-Forwarded-Forを信用しない。
+    TRUSTED_PROXY_COUNT = proxy_count_from_environ()
 
 
 class DevelopmentConfig(BaseConfig):

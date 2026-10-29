@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import ipaddress
 from datetime import datetime, timedelta, timezone
 
 from flask import current_app, jsonify, request
@@ -195,12 +196,32 @@ def tokens_match(left, right) -> bool:
     return hmac.compare_digest(left, right)
 
 
-def enforce_rate(scope: str) -> None:
+RATE_MESSAGE = "試行回数が多すぎます。しばらくしてからやり直してください。"
+
+
+def client_key() -> str:
+    """回数制限で数える接続元。IPv6は回線単位で配られる/64にまとめ、付け替えで逃げられないようにする。
+
+    リバースプロキシ越しの接続元は、TRUSTED_PROXY_COUNT を設定したときだけ ProxyFix が remote_addr に入れる。
+    """
+    try:
+        address = ipaddress.ip_address(request.remote_addr or "")
+    except ValueError:
+        return "unknown"
+    if address.version == 6:
+        if address.ipv4_mapped is not None:
+            return str(address.ipv4_mapped)
+        return str(ipaddress.ip_network(f"{address}/64", strict=False))
+    return str(address)
+
+
+def enforce_rate(scope: str, ident: str | None = None, message: str = RATE_MESSAGE) -> None:
+    """scopeごとに回数を数える。identを省くと接続元、"all"ならサイト全体、"user:<id>"ならアカウント単位。"""
     if not current_app.config.get("RATELIMIT_ENABLED", True):
         return
     limit, window = current_app.config["RATE_LIMITS"][scope]
     now = utcnow()
-    ident = request.remote_addr or "unknown"
+    ident = client_key() if ident is None else ident
     key = hashlib.sha256(f"{scope}|{ident}".encode()).hexdigest()
     bucket = db.session.get(RateLimitBucket, key)
     if bucket is None:
@@ -213,7 +234,7 @@ def enforce_rate(scope: str) -> None:
             db.session.rollback()
             bucket = db.session.get(RateLimitBucket, key)
             if bucket is None:
-                fail("rate_limited", 429, "試行回数が多すぎます。しばらくしてからやり直してください。",
+                fail("rate_limited", 429, message,
                      action="rate_limited", target_type="rate_limit", target_id=scope)
     if bucket.window_started_at + timedelta(seconds=window) <= now:
         bucket.window_started_at = now
@@ -221,7 +242,7 @@ def enforce_rate(scope: str) -> None:
         db.session.commit()
         return
     if bucket.hit_count >= limit:
-        fail("rate_limited", 429, "試行回数が多すぎます。しばらくしてからやり直してください。",
+        fail("rate_limited", 429, message,
              action="rate_limited", target_type="rate_limit", target_id=scope)
     bucket.hit_count += 1
     db.session.commit()

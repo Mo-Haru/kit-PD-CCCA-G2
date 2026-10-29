@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from app.extensions import db
 from app.models import QrShare, QrShareVersion, QrViewSession, UserDataKey, utcnow
 from app.models.base import new_share_id
+from app.services.share_quota import admit_new_share
 from app.services.support import (
     ActionResult,
     audit,
@@ -117,6 +118,7 @@ def create_share(body: dict) -> dict:
     user, session_row, _passkey = load_login()
     require_reauth(session_row)
     expect_fields(body, CREATE_FIELDS)
+    admit_new_share(user.id)
     mode = body.get("mode")
     now = utcnow()
     if mode in {"emergency", "unlimited"}:
