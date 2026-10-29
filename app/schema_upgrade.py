@@ -256,6 +256,13 @@ def _allow_unlimited_qr() -> None:
         db.session.remove()
 
 
+def _create_share_quota_locks() -> None:
+    """共有の枠を確かめるロック行の表を足す。既存の表には触れない。"""
+    from app.models import ShareQuotaLock
+
+    ShareQuotaLock.__table__.create(bind=db.engine, checkfirst=True)
+
+
 STEPS = (
     ("20261015_protection_tables", _create_protection_tables),
     ("20261015_migration_decrypt_confirmed", _add_migration_decrypt_confirmed),
@@ -263,6 +270,7 @@ STEPS = (
     ("20261020_passkey_proven_at", _add_passkey_proven_at),
     ("20261021_contact_hash_hmac", _migrate_contact_hashes),
     ("20261026_unlimited_qr", _allow_unlimited_qr),
+    ("20261029_share_quota_locks", _create_share_quota_locks),
 )
 
 

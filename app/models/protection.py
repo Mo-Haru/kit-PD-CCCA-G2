@@ -101,6 +101,15 @@ class RateLimitBucket(Model):
     hit_count: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class ShareQuotaLock(Model):
+    """有効な共有の枠を確かめて作成するまで、同じアカウントの操作を1件ずつにするためのロック行。"""
+
+    __tablename__ = "share_quota_locks"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class VerifiedContact(IdentityMixin, CreatedMixin, Model):
     """検証済み連絡先。平文のメールアドレスは保存しない。"""
 
@@ -341,6 +350,7 @@ PROTECTION_MODELS = (
     UserKeyBundle,
     SessionReauth,
     RateLimitBucket,
+    ShareQuotaLock,
     VerifiedContact,
     FamilyInvitation,
     FamilyConnection,

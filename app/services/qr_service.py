@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from app.extensions import db
 from app.models import QrShare, QrShareVersion, QrViewSession, UserDataKey, utcnow
 from app.models.base import new_share_id
+from app.services.share_quota import admit_new_share, require_capacity_to_revive
 from app.services.support import (
     ActionResult,
     audit,
@@ -117,6 +118,7 @@ def create_share(body: dict) -> dict:
     user, session_row, _passkey = load_login()
     require_reauth(session_row)
     expect_fields(body, CREATE_FIELDS)
+    admit_new_share(user.id)
     mode = body.get("mode")
     now = utcnow()
     if mode in {"emergency", "unlimited"}:
@@ -235,6 +237,9 @@ def change_expiry(share_id: str, body: dict) -> dict:
     latest = utcnow() + timedelta(seconds=int(current_app.config["QR_TIMED_MAX_SECONDS"]))
     if expires > latest:
         fail("invalid_time", 400, "期限付きQRの期限が範囲外です。", actor_id=user.id)
+    # 停止済みは期限を変えても有効に戻らないので数えない。
+    if share.stopped_at is None:
+        require_capacity_to_revive(user.id, share.expires_at, expires)
     share.expires_at = expires
     audit("qr_expiry_changed", "qr_share", share.id, "success", actor_id=user.id)
     db.session.commit()
