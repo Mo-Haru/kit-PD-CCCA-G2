@@ -6,6 +6,8 @@ create_allは未作成テーブルの追加にだけ使う。既存テーブル�
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from sqlalchemy import inspect, text
 
 from app.extensions import db
@@ -205,15 +207,51 @@ def _add_passkey_proven_at() -> None:
     db.session.commit()
 
 
-def _allow_unlimited_qr() -> None:
-    """Extend QR modes without changing issued shares, versions, or sessions."""
+def _qr_mode_constraint() -> str | None:
+    inspector = inspect(db.engine)
+    if "qr_shares" not in inspector.get_table_names():
+        return None
+    constraints = {row["name"]: row["sqltext"] for row in inspector.get_check_constraints("qr_shares")}
+    return constraints.get("ck_qr_shares_mode", "")
+
+
+def _rebuild_sqlite_qr_shares(prepare=None) -> None:
+    """qr_sharesを現在のモデルで作り直す。prepareは退避表の行を新しい制約へ合わせる。"""
     from app.models import QrShare
 
     inspector = inspect(db.engine)
-    if "qr_shares" not in inspector.get_table_names():
-        return
-    constraints = {row["name"]: row["sqltext"] for row in inspector.get_check_constraints("qr_shares")}
-    if "unlimited" in constraints.get("ck_qr_shares_mode", ""):
+    columns = [column.name for column in QrShare.__table__.columns]
+    if set(columns) != {column["name"] for column in inspector.get_columns("qr_shares")}:
+        raise RuntimeError("QR共有の列構成が一致しません。既存データは変更していません。")
+    names = ", ".join(f'"{name}"' for name in columns)
+    connection = db.session.connection()
+    set_sqlite_foreign_keys(connection, False)
+    try:
+        # Explicit BEGIN also makes DDL transactional in sqlite's legacy mode.
+        connection.exec_driver_sql("BEGIN IMMEDIATE")
+        connection.exec_driver_sql(f"CREATE TABLE qr_shares_keep AS SELECT {names} FROM qr_shares")
+        if prepare is not None:
+            prepare(connection)
+        connection.exec_driver_sql("DROP TABLE qr_shares")
+        QrShare.__table__.create(bind=connection)
+        connection.exec_driver_sql(f"INSERT INTO qr_shares ({names}) SELECT {names} FROM qr_shares_keep")
+        connection.exec_driver_sql("DROP TABLE qr_shares_keep")
+        if connection.exec_driver_sql("PRAGMA foreign_key_check").fetchall():
+            raise RuntimeError("QR共有の外部キーを保持できないため、更新を取り消します。")
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        set_sqlite_foreign_keys(connection, True)
+        db.session.remove()
+
+
+def _allow_unlimited_qr() -> None:
+    """Extend QR modes without changing issued shares, versions, or sessions."""
+    constraint = _qr_mode_constraint()
+    # 長期QRへ置き換え済みの表は、次の手順の形になっている。
+    if constraint is None or "unlimited" in constraint or "'long'" in constraint:
         return
     if db.engine.dialect.name == "postgresql":
         for name in ("mode", "mode_expiry"):
@@ -231,29 +269,78 @@ def _allow_unlimited_qr() -> None:
         return
     if db.engine.dialect.name != "sqlite":
         raise RuntimeError("QR共有のスキーマ更新に未対応のDBです。")
-    columns = [column.name for column in QrShare.__table__.columns]
-    if set(columns) != {column["name"] for column in inspector.get_columns("qr_shares")}:
-        raise RuntimeError("QR共有の列構成が一致しません。既存データは変更していません。")
-    names = ", ".join(f'"{name}"' for name in columns)
-    connection = db.session.connection()
-    set_sqlite_foreign_keys(connection, False)
-    try:
-        # Explicit BEGIN also makes DDL transactional in sqlite's legacy mode.
-        connection.exec_driver_sql("BEGIN IMMEDIATE")
-        connection.exec_driver_sql(f"CREATE TABLE qr_shares_keep AS SELECT {names} FROM qr_shares")
-        connection.exec_driver_sql("DROP TABLE qr_shares")
-        QrShare.__table__.create(bind=connection)
-        connection.exec_driver_sql(f"INSERT INTO qr_shares ({names}) SELECT {names} FROM qr_shares_keep")
-        connection.exec_driver_sql("DROP TABLE qr_shares_keep")
-        if connection.exec_driver_sql("PRAGMA foreign_key_check").fetchall():
-            raise RuntimeError("QR共有の外部キーを保持できないため、更新を取り消します。")
-        connection.commit()
-    except Exception:
-        connection.rollback()
-        raise
-    finally:
-        set_sqlite_foreign_keys(connection, True)
-        db.session.remove()
+    _rebuild_sqlite_qr_shares()
+
+
+def _replace_unlimited_qr_with_long() -> None:
+    """無期限QRを、作成から最長期間で切れる長期QRへ置き換える。共有と閲覧セッションは残す。"""
+    from flask import current_app
+    from sqlalchemy import bindparam
+
+    from app.models import QrShare
+
+    constraint = _qr_mode_constraint()
+    if constraint is None or "'long'" in constraint:
+        return
+    lifetime = timedelta(seconds=int(current_app.config["QR_LONG_MAX_SECONDS"]))
+    if db.engine.dialect.name == "postgresql":
+        for name in ("mode", "mode_expiry"):
+            db.session.execute(text(f"ALTER TABLE qr_shares DROP CONSTRAINT ck_qr_shares_{name}"))
+        db.session.execute(text(
+            "UPDATE qr_shares SET mode = 'long', expires_at = created_at + make_interval(secs => :seconds) "
+            "WHERE mode = 'unlimited'"
+        ), {"seconds": int(lifetime.total_seconds())})
+        db.session.execute(text(
+            "ALTER TABLE qr_shares ADD CONSTRAINT ck_qr_shares_mode "
+            "CHECK (mode IN ('emergency', 'timed', 'long'))"
+        ))
+        db.session.execute(text(
+            "ALTER TABLE qr_shares ADD CONSTRAINT ck_qr_shares_mode_expiry CHECK ("
+            "(mode = 'emergency' AND expires_at IS NULL) OR "
+            "(mode IN ('timed', 'long') AND expires_at IS NOT NULL AND expires_at > created_at))"
+        ))
+        db.session.commit()
+        return
+    if db.engine.dialect.name != "sqlite":
+        raise RuntimeError("QR共有のスキーマ更新に未対応のDBです。")
+    unlimited = db.session.execute(
+        QrShare.__table__.select().with_only_columns(QrShare.id, QrShare.created_at)
+        .where(QrShare.mode == "unlimited")
+    ).all()
+    db.session.commit()
+    expires_type = QrShare.__table__.c.expires_at.type
+    statement = text(
+        "UPDATE qr_shares_keep SET mode = 'long', expires_at = :expires WHERE id = :share_id"
+    ).bindparams(bindparam("expires", type_=expires_type))
+
+    def prepare(connection):
+        for share_id, created_at in unlimited:
+            connection.execute(statement, {"expires": created_at + lifetime, "share_id": share_id})
+
+    _rebuild_sqlite_qr_shares(prepare)
+
+
+def _add_invitation_confirmation() -> None:
+    """招待の申請者が渡す確認リンクとコードの列を足す。既存の申請は再発行まで承認できない。"""
+    inspector = inspect(db.engine)
+    if "family_invitations" not in inspector.get_table_names():
+        return
+    names = {column["name"] for column in inspector.get_columns("family_invitations")}
+    blob = "BYTEA" if db.engine.dialect.name == "postgresql" else "BLOB"
+    for column, kind in (
+        ("confirm_token_hash", blob),
+        ("confirm_code_hash", blob),
+        ("confirm_failures", "INTEGER NOT NULL DEFAULT 0"),
+    ):
+        if column not in names:
+            db.session.execute(text(f"ALTER TABLE family_invitations ADD COLUMN {column} {kind}"))
+    indexes = {index["name"] for index in inspect(db.engine).get_indexes("family_invitations")}
+    if "uq_family_invitations_confirm_token" not in indexes:
+        db.session.execute(text(
+            "CREATE UNIQUE INDEX uq_family_invitations_confirm_token "
+            "ON family_invitations (confirm_token_hash)"
+        ))
+    db.session.commit()
 
 
 def _create_share_quota_locks() -> None:
@@ -271,6 +358,8 @@ STEPS = (
     ("20261021_contact_hash_hmac", _migrate_contact_hashes),
     ("20261026_unlimited_qr", _allow_unlimited_qr),
     ("20261029_share_quota_locks", _create_share_quota_locks),
+    ("20261029_long_qr", _replace_unlimited_qr_with_long),
+    ("20261029_family_invite_confirmation", _add_invitation_confirmation),
 )
 
 

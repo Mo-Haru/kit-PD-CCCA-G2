@@ -4,6 +4,7 @@ import {
 } from "./client.mjs";
 import { entriesFromPayload, fillAnswerList, plaintextForSelection, presentAnswer, shareFingerprint } from "./crypto.mjs";
 import qrcode from "../../vendor/qrcode-generator-2.0.4.mjs";
+import { hideConfirmation, showConfirmation } from "./family-confirmation.mjs";
 
 const status = document.querySelector("#status");
 const incoming = document.querySelector("#incoming");
@@ -25,6 +26,7 @@ let detailTrigger = null;
 const stateName = state => ({ active: "共有中", stopped: "停止済み", expired: "期限切れ", key_pending: "再共有が必要" }[state] || state);
 const shareState = share => share.status !== "stopped" && share.expires_at && new Date(share.expires_at).getTime() <= Date.now() ? "expired" : share.status;
 const node = id => document.querySelector(`#${id}`);
+let confirmationLink = "";
 
 function show(text) {
   status.textContent = text;
@@ -115,6 +117,8 @@ async function syncAccess() {
     node("invite-link").textContent = "";
     node("invite-qr-output").replaceChildren();
     node("invite-output").hidden = true;
+    confirmationLink = "";
+    hideConfirmation(node);
     closeFamilyDetail();
     renderCatalog();
     syncFamilyControls();
@@ -521,14 +525,44 @@ async function refresh() {
     const states = { pending: "承諾を待っています", awaiting_sender: "家族登録の確認待ち", accepted: "家族に登録済み", expired: "期限切れ", rejected: "取り消し済み" };
     item.textContent = `${invitation.incoming ? invitation.sender_display_name || "家族" : invitation.recipient_display_name || "招待した方"} · ${states[invitation.status] || "招待終了"}`;
     if (!invitation.incoming && invitation.status === "awaiting_sender") {
-      item.append(button("家族に追加", async () => {
-        try {
-          await api(`/api/v1/family/invitations/${invitation.id}/confirm`, { method: "POST", body: {} });
-          show("家族に追加しました。");
-          await refresh();
-        } catch (error) {
-          showError(error);
+      // 表示名は申請者が自由に付けられる。本人から直接受け取った確認コードかリンクでだけ追加する。
+      const help = document.createElement("p");
+      help.className = "note";
+      help.textContent = "申請した家族本人から受け取った確認コードを入力するか、確認リンクを開いてください。表示名だけで追加しないでください。";
+      const code = document.createElement("input");
+      code.type = "text";
+      code.id = `confirm-code-${invitation.id}`;
+      code.className = "md-field-control";
+      code.autocomplete = "off";
+      code.spellcheck = false;
+      code.maxLength = 9;
+      code.placeholder = "例: ABCD-EFGH";
+      const label = document.createElement("label");
+      label.className = "md-field-label";
+      label.htmlFor = code.id;
+      label.textContent = "確認コード";
+      const field = document.createElement("div");
+      field.className = "md-field md-field--raised";
+      field.append(label, code);
+      item.append(help, field, button("確認コードで家族に追加", async () => {
+        if (!code.value.trim()) {
+          show("申請した家族から受け取った確認コードを入力してください。");
+          return;
         }
+        const result = await api(`/api/v1/family/invitations/${invitation.id}/confirm`, {
+          method: "POST", body: { code: code.value },
+        });
+        show(`${result.recipient_display_name || "家族"} さんを家族に追加しました。`);
+        await refresh();
+      }));
+    }
+    if (invitation.incoming && invitation.status === "awaiting_sender") {
+      item.append(button("確認コードを再発行", async () => {
+        if (!globalThis.confirm("確認リンクと確認コードを作り直しますか？\n前に渡したリンクとコードは使えなくなります。")) return;
+        const result = await api(`/api/v1/family/invitations/${invitation.id}/confirmation`, { method: "POST", body: {} });
+        confirmationLink = showConfirmation(node, result.confirmation, location.origin);
+        show("新しい確認リンクと確認コードを表示しました。招待した方に直接渡してください。");
+        node("confirmation-output").scrollIntoView?.({ block: "nearest" });
       }));
     }
     if (invitation.status === "pending" || invitation.status === "awaiting_sender") {
@@ -619,6 +653,15 @@ if (document.querySelector("#share")) {
   for (const id of ["questions", "chapters", "connection", "expires-at"]) node(id).addEventListener("change", clearConfirmation);
   node("expires-at").addEventListener("input", clearConfirmation);
   node("confirm-share").addEventListener("change", syncFamilyControls);
+  node("copy-confirmation").addEventListener("click", async () => {
+    if (!confirmationLink) return;
+    try {
+      await navigator.clipboard.writeText(confirmationLink);
+      show("確認リンクをコピーしました。招待した方に直接渡してください。");
+    } catch (_error) {
+      show("コピーできなかったので、表示中のリンクを選んで渡してください。");
+    }
+  });
   document.querySelector("#copy-invite").addEventListener("click", async () => {
     const link = document.querySelector("#invite-link").textContent;
     if (!link) {

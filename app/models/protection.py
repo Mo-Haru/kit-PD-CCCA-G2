@@ -143,6 +143,7 @@ class FamilyInvitation(IdentityMixin, CreatedMixin, Model):
             "kind != 'email' OR address_hash IS NOT NULL",
             name="email_hash_required",
         ),
+        Index("uq_family_invitations_confirm_token", "confirm_token_hash", unique=True),
     )
 
     sender_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
@@ -154,6 +155,10 @@ class FamilyInvitation(IdentityMixin, CreatedMixin, Model):
     recipient_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), index=True)
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), index=True)
     resolved_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    # 申請した人だけが受け取る確認リンクとコード。招待した人はこれを受け取って承認する。
+    confirm_token_hash: Mapped[bytes | None] = mapped_column(LargeBinary(32))
+    confirm_code_hash: Mapped[bytes | None] = mapped_column(LargeBinary(32))
+    confirm_failures: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
 
 class FamilyConnection(IdentityMixin, CreatedMixin, Model):
@@ -242,9 +247,9 @@ class FamilyShareOwnerCopy(IdentityMixin, CreatedMixin, Model):
 class QrShare(CreatedMixin, UpdatedMixin, Model):
     __tablename__ = "qr_shares"
     __table_args__ = (
-        CheckConstraint("mode IN ('emergency', 'timed', 'unlimited')", name="mode"),
+        CheckConstraint("mode IN ('emergency', 'timed', 'long')", name="mode"),
         CheckConstraint(
-            "(mode IN ('emergency', 'unlimited') AND expires_at IS NULL) OR (mode = 'timed' AND expires_at IS NOT NULL AND expires_at > created_at)",
+            "(mode = 'emergency' AND expires_at IS NULL) OR (mode IN ('timed', 'long') AND expires_at IS NOT NULL AND expires_at > created_at)",
             name="mode_expiry",
         ),
         CheckConstraint("length(public_key) = 32", name="public_key_length"),

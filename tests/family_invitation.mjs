@@ -4,8 +4,9 @@ import { bindFamilyInvitation } from "../app/static/js/watashi/family-invitation
 function page() {
   const events = {};
   const nodes = Object.fromEntries(["family-invitation", "invite-session", "invite-status", "invite-guest",
-    "invite-login", "invite-confirmation", "accept-invitation"].map(id => [id, {
-    textContent: "", disabled: true, hidden: false, listeners: {},
+    "invite-login", "invite-confirmation", "accept-invitation", "confirmation-output", "confirmation-code",
+    "confirmation-link", "confirmation-qr", "confirmation-expiry", "copy-confirmation"].map(id => [id, {
+    textContent: "", disabled: true, hidden: id === "confirmation-output", listeners: {},
     addEventListener(name, callback) { this.listeners[name] = callback; },
     fire(name) { return this.listeners[name](); },
   }]));
@@ -39,8 +40,11 @@ async function api(path, options = {}) {
   assert.equal(path, "/api/v1/family/invitations/request");
   assert.equal(options.method, "POST");
   posts.push(options.body);
-  return { invitation: { status: "awaiting_sender" } };
+  return { invitation: { status: "awaiting_sender" }, confirmation };
 }
+const confirmation = { token: "c".repeat(43), code: "ABCD-EFGH", confirm_path: "/family/confirm", expires_at: "2099-01-01T00:00:00Z" };
+const qrInputs = [];
+const fakeQr = text => { qrInputs.push(text); return "data:image/gif;base64,AA=="; };
 const guest = page();
 await bindFamilyInvitation(guest, api, address, history);
 assert.equal(guest.nodes["invite-guest"].hidden, false);
@@ -56,7 +60,8 @@ assert.equal(guest.nodes["accept-invitation"].disabled, true);
 account = { authenticated: true, user_id: "person-a", display_name: "サンプルA" };
 const loggedIn = page();
 const loggedInAddress = { ...address };
-await bindFamilyInvitation(loggedIn, api, loggedInAddress, navigationFor(loggedInAddress));
+await bindFamilyInvitation(loggedIn, api, loggedInAddress, navigationFor(loggedInAddress), fakeQr);
+assert.equal(loggedIn.nodes["confirmation-output"].hidden, true);
 assert.ok(loggedIn.nodes["invite-session"].textContent.includes("サンプルA でログイン中"));
 assert.equal(loggedIn.nodes["invite-confirmation"].hidden, false);
 assert.equal(posts.length, 0);
@@ -69,7 +74,16 @@ assert.deepEqual(posts, [{ token }]);
 assert.equal(loggedIn.nodes["invite-confirmation"].hidden, true);
 assert.equal(navigations.at(-1), "/family/invite");
 assert.equal(loggedInAddress.hash, "");
-const successMessage = "招待を承諾しました。招待した方の確認をお待ちください。";
+const successMessage = "招待を承諾しました。下の確認リンクか確認コードを、招待した方に直接渡してください。";
+// The requester gets the code and a fragment-only link (and QR of that link) to hand over in person.
+assert.equal(loggedIn.nodes["confirmation-output"].hidden, false);
+assert.equal(loggedIn.nodes["confirmation-code"].textContent, "ABCD-EFGH");
+const handedLink = new URL(loggedIn.nodes["confirmation-link"].textContent);
+assert.equal(handedLink.pathname, "/family/confirm");
+assert.equal(handedLink.search, "");
+assert.equal(new URLSearchParams(handedLink.hash.slice(1)).get("token"), confirmation.token);
+assert.deepEqual(qrInputs, [handedLink.toString()]);
+assert.equal(loggedIn.nodes["confirmation-qr"].src, "data:image/gif;base64,AA==");
 assert.equal(loggedIn.nodes["invite-status"].textContent, successMessage);
 assert.equal(loggedIn.nodes["invite-session"].textContent, "サンプルB でログイン中");
 assert.equal(loggedIn.nodes["accept-invitation"].disabled, true);

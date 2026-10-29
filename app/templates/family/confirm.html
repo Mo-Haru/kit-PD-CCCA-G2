@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}家族登録の確認 | 意思の記録{% endblock %}
+{% block extra_head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/morishita.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/answers.css') }}">
+{% endblock %}
+{% block content %}
+  <section id="family-confirm" class="sensitive answer-demo" aria-labelledby="family-confirm-title">
+    <h1 id="family-confirm-title">家族登録の確認</h1>
+    <p>家族から受け取った確認リンクです。招待したアカウントで開き、本人確認をすると家族として登録します。</p>
+    <p id="confirm-session" role="status" aria-live="polite">ログイン状態を確認しています。</p>
+    <p id="confirm-status" class="status-message" role="status" aria-live="polite"></p>
+    <div id="confirm-guest" hidden>
+      <p>招待したアカウントでログインしてください。</p>
+      <a id="confirm-login" class="demo-launch" href="{{ url_for('auth.index', next=url_for('protection_pages.family_confirm')) }}">ログインして確認</a>
+    </div>
+    <div id="confirm-action" hidden>
+      <p>このリンクを、申請した家族本人から直接受け取った場合だけ登録してください。</p>
+      <button id="confirm-link" class="button-primary" type="button" disabled>パスキーで本人確認して家族に追加</button>
+    </div>
+    <p><a href="{{ url_for('protection_pages.family') }}">家族画面へ</a></p>
+  </section>
+  <script type="module" src="{{ url_for('static', filename='js/watashi/family-confirm.mjs') }}"></script>
+{% endblock %}

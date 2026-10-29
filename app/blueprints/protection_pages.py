@@ -15,6 +15,11 @@ def family_invite():
     return render_template("family/invite.html")
 
 
+@bp.get("/family/confirm", strict_slashes=False)
+def family_confirm():
+    return render_template("family/confirm.html")
+
+
 @bp.get("/transfer", strict_slashes=False)
 def transfer():
     return render_template("transfer/index.html")

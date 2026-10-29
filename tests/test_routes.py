@@ -181,6 +181,32 @@ def test_family_invitation_login_return_and_confirmation():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_family_confirm_page_waits_for_explicit_confirmation(client):
+    from tests.test_menu import StrictMarkup
+
+    response = client.get("/family/confirm")
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "no-store"
+    markup = StrictMarkup(response.get_data(as_text=True))
+    markup.module_script("/static/js/watashi/family-confirm.mjs")
+    assert "disabled" in markup.one_id("confirm-link").attrs
+    for hidden in ("confirm-guest", "confirm-action"):
+        assert "hidden" in markup.one_id(hidden).attrs
+    invite = StrictMarkup(client.get("/family/invite").get_data(as_text=True))
+    assert "hidden" in invite.one_id("confirmation-output").attrs
+    family = StrictMarkup(client.get("/family").get_data(as_text=True))
+    assert "hidden" in family.one_id("confirmation-output").attrs
+    assert client.post("/family/confirm").status_code == 405
+
+
+def test_family_confirm_link_page():
+    result = subprocess.run(
+        ["node", "tests/family_confirm_page.mjs"], cwd=Path(__file__).resolve().parents[1],
+        capture_output=True, text=True, timeout=20, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_unknown_page_returns_404(client):
     response = client.get("/missing")
     assert response.status_code == 404

@@ -1,6 +1,7 @@
 import { api } from "./client.mjs";
+import { qrDataUrl, showConfirmation } from "./family-confirmation.mjs";
 
-export async function bindFamilyInvitation(root, call = api, address = location, navigation = history) {
+export async function bindFamilyInvitation(root, call = api, address = location, navigation = history, makeQr = qrDataUrl) {
   if (!root.querySelector("#family-invitation")) return;
   const node = id => root.querySelector(`#${id}`);
   const readToken = () => new URLSearchParams(address.hash.slice(1)).get("token");
@@ -11,6 +12,7 @@ export async function bindFamilyInvitation(root, call = api, address = location,
   let accountId = null;
   let authenticated = false;
   let stale = false;
+  let confirmationLink = "";
   function show(text) { node("invite-status").textContent = text; }
   function tokenStillMatches() {
     if (!stale && readToken() !== token) {
@@ -33,6 +35,13 @@ export async function bindFamilyInvitation(root, call = api, address = location,
   login.hash = new URLSearchParams({ "return-fragment": `token=${token}` }).toString();
   node("invite-login").href = login.pathname + login.search + login.hash;
   root.defaultView?.addEventListener("hashchange", tokenStillMatches);
+  node("copy-confirmation")?.addEventListener("click", async () => {
+    if (!confirmationLink) return;
+    try {
+      await navigator.clipboard.writeText(confirmationLink);
+      show("確認リンクをコピーしました。招待した方に直接渡してください。");
+    } catch (_error) { show("コピーできませんでした。表示中のリンクを選択してコピーしてください。"); }
+  });
   async function session() {
     const state = await call("/api/v1/auth/session");
     if (!tokenStillMatches()) return null;
@@ -55,12 +64,13 @@ export async function bindFamilyInvitation(root, call = api, address = location,
         show("ログイン中のアカウントが変わりました。表示名を確認して、もう一度承諾してください。");
         return;
       }
-      await call("/api/v1/family/invitations/request", { method: "POST", body: { token } });
+      const result = await call("/api/v1/family/invitations/request", { method: "POST", body: { token } });
       if (!tokenStillMatches()) return;
       accepted = true;
       navigation.replaceState(null, "", address.pathname);
       node("invite-confirmation").hidden = true;
-      show("招待を承諾しました。招待した方の確認をお待ちください。");
+      confirmationLink = showConfirmation(node, result.confirmation, address.origin, makeQr);
+      show("招待を承諾しました。下の確認リンクか確認コードを、招待した方に直接渡してください。");
     } catch (error) { if (tokenStillMatches()) show(error.message || "招待を承諾できませんでした。"); }
     finally {
       busy = false;

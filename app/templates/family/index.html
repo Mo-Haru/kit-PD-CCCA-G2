@@ -20,9 +20,10 @@
       <div id="invite-qr-output"></div>
       <p id="invite-link" class="secret-link"></p>
       <button id="copy-invite" type="button">招待リンクをコピー</button>
-      <p class="note">相手が承諾すると、下に家族登録の確認が表示されます。</p>
+      <p class="note">相手が承諾すると、相手の画面に確認リンクと確認コードが表示されます。相手本人から受け取り、確認リンクを開くか、下の一覧で確認コードを入力すると家族として登録されます。</p>
     </div>
     <ul id="incoming" class="record-list"></ul>
+    {% include "family/_confirmation.html" %}
     <h2>家族</h2>
     <ul id="connections" class="record-list"></ul>
     <h2>共有する範囲</h2>

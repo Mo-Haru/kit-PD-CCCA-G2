@@ -35,7 +35,7 @@ const ids = ["sharing-page", "share-fields", "status", "unlock-here", "refresh-s
   "qr-output", "share-url", "open-link", "login-here", "lock-state", "show-preview", "link-facts", "copy-link",
   "sharing-unlock-help", "encrypted-answers", "answer-ciphertext", "all-answers", "share-detail",
   "share-stop-top", "share-stop-bottom", "share-close-top", "share-close-bottom", "share-detail-status",
-  "share-detail-facts", "share-detail-unlock", "share-detail-cipher", "share-detail-answers"];
+  "share-detail-facts", "share-detail-unlock", "share-detail-cipher", "share-detail-answers", "long-warning"];
 const nodes = Object.fromEntries(ids.map(id => [id, new Element()]));
 const scope = { value: "questions" }, mode = { value: "emergency" };
 const root = {
@@ -204,15 +204,30 @@ nodes["share-close-bottom"].fire("click");
 assert.equal(nodes["share-detail"].open, false);
 assert.equal(nodes["share-detail-answers"].children.length, 0);
 assert.equal(opener.focused, true);
-// Unlimited links need no expiry and can be opened/stopped through the same modal.
-mode.value = "unlimited";
+// Long links show a strong warning, default to three years, and never go past it.
+assert.equal(nodes["long-warning"].hidden, true);
+mode.value = "long";
 nodes["share-fields"].fire("change", { target: mode });
+assert.equal(nodes["long-warning"].hidden, false);
+assert.equal(nodes["expiry-field"].hidden, false);
+const longDefault = new Date(nodes["expires-at"].value);
+const threeYears = new Date();
+threeYears.setFullYear(threeYears.getFullYear() + 3);
+assert.ok(Math.abs(longDefault - threeYears) < 120000, nodes["expires-at"].value);
+const savedDefault = nodes["expires-at"].value;
+nodes["expires-at"].value = new Date(Date.now() + 1100 * 86400000).toISOString();
+await nodes["expires-at"].fire("input");
+assert.equal(nodes["show-preview"].disabled, true);
+nodes["expires-at"].value = savedDefault;
+await nodes["expires-at"].fire("input");
+assert.equal(nodes["show-preview"].disabled, false);
 await nodes["show-preview"].fire("click");
-assert.ok(text(nodes["preview-output"]).includes("無期限・複数回"));
+assert.ok(text(nodes["preview-output"]).includes("長期（最長3年）"));
+assert.ok(text(nodes["preview-output"]).includes("誰でも何回でも閲覧できます"));
 nodes["confirm-share"].checked = true;
 await nodes["create-qr"].fire("click");
-assert.equal(created[1].mode, "unlimited");
-assert.equal(created[1].expiresAt, null);
+assert.equal(created[1].mode, "long");
+assert.equal(new Date(created[1].expiresAt).getTime(), longDefault.getTime());
 await nodes["qr-shares"].querySelectorAll("button")[1].fire("click");
 confirmStop = false;
 await nodes["share-stop-top"].fire("click");

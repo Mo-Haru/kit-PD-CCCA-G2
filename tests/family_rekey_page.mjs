@@ -137,6 +137,8 @@ function createDocument() {
     "invite-qr", "invite-qr-output", "invite-output", "all-answers", "encrypted-answers", "answer-ciphertext",
     "family-detail", "family-detail-title", "family-detail-body", "family-detail-status", "family-detail-unlock",
     "family-close-top", "family-close-bottom", "family-stop-top", "family-stop-bottom",
+    "confirmation-output", "confirmation-code", "confirmation-link", "confirmation-qr", "confirmation-expiry",
+    "copy-confirmation",
   ];
   for (const id of ids) {
     const tag = id === "connection" ? "select" : id === "expires-at" || id === "confirm-share" ? "input" : "div";
@@ -205,6 +207,7 @@ const receivedShare = { id: "received-share-1", owner_user_id: "user-2", owner_d
 const calls = [];
 let activeKeyId = "new-key";
 let ownStatus = "key_pending";
+let invitationList = [];
 let confirmStop = false;
 const stopPrompts = [];
 globalThis.confirm = message => { stopPrompts.push(message); return confirmStop; };
@@ -246,7 +249,16 @@ globalThis.fetch = async (path, options = {}) => {
   if (path === "/api/v1/family/invitations" && method === "POST") return reply(200, {
     invite_path: "/family/invite", token: "q".repeat(43), invitation: { status: "pending" },
   });
-  if (path === "/api/v1/family/invitations") return reply(200, { invitations: [] });
+  if (path === "/api/v1/family/invitations") return reply(200, { invitations: invitationList });
+  if (path === "/api/v1/family/invitations/inv-out/confirm" && method === "POST") {
+    return body.code === "ABCD-EFGH"
+      ? reply(200, { connection_id: "conn-2", recipient_display_name: "申請した家族" })
+      : reply(400, { error: "confirmation_mismatch", message: "確認コードが一致しません。あと4回間違えると、この申請は無効になります。" });
+  }
+  if (path === "/api/v1/family/invitations/inv-in/confirmation" && method === "POST") return reply(200, {
+    invitation: { id: "inv-in", status: "awaiting_sender" },
+    confirmation: { token: "t".repeat(43), code: "WXYZ-2345", confirm_path: "/family/confirm", expires_at: "2099-01-01T00:00:00Z" },
+  });
   if (path === "/api/v1/family/connections") {
     return reply(200, {
       connections: [{ id: "conn-1", status: "active", other_user_id: "user-2", other_display_name: "家族" }],
@@ -446,6 +458,38 @@ check("invite QR is generated locally", image && image.src.startsWith("data:imag
 const inviteUrl = new URL(document.querySelector("#invite-link").textContent);
 check("invitation token stays out of query parameters", inviteUrl.pathname === "/family/invite" && inviteUrl.search === "" && inviteUrl.hash.includes("token="));
 check("QR opens the same dedicated invitation page", document.querySelector("#invite-output").hidden === false);
+
+// 申請が届いても、表示名だけでは追加できない。申請者本人から受け取ったコードで追加する。
+invitationList = [
+  { id: "inv-out", kind: "open", status: "awaiting_sender", incoming: false, recipient_display_name: "申請した家族" },
+  { id: "inv-in", kind: "open", status: "awaiting_sender", incoming: true, sender_display_name: "招待した家族" },
+];
+await document.querySelector("#invite-open").click();
+check("no code-less add button remains", buttonNamed("家族に追加") === null);
+const codeInput = document.querySelector("#confirm-code-inv-out");
+check("sender sees a code field", codeInput && codeInput.tag === "input");
+const confirmsBefore = calls.filter(item => item.path.endsWith("/inv-out/confirm")).length;
+await buttonNamed("確認コードで家族に追加").click();
+check("empty code is not sent", calls.filter(item => item.path.endsWith("/inv-out/confirm")).length === confirmsBefore);
+codeInput.value = "AAAA-AAAA";
+await buttonNamed("確認コードで家族に追加").click();
+check("wrong code shows remaining attempts", document.querySelector("#status").textContent.includes("あと4回"));
+document.querySelector("#confirm-code-inv-out").value = "ABCD-EFGH";
+await buttonNamed("確認コードで家族に追加").click();
+const confirmPost = calls.findLast(item => item.path.endsWith("/inv-out/confirm"));
+check("the typed code is sent", confirmPost && confirmPost.body.code === "ABCD-EFGH");
+check("success names the added family", document.querySelector("#status").textContent.includes("申請した家族 さんを家族に追加しました"));
+check("requester does not get a code field", document.querySelector("#confirm-code-inv-in") === null);
+confirmStop = false;
+await buttonNamed("確認コードを再発行").click();
+check("reissue asks before invalidating the old code", !calls.some(item => item.path.endsWith("/inv-in/confirmation")));
+confirmStop = true;
+await buttonNamed("確認コードを再発行").click();
+check("reissued code is shown", document.querySelector("#confirmation-code").textContent === "WXYZ-2345");
+const handed = new URL(document.querySelector("#confirmation-link").textContent);
+check("reissued link keeps the token in the fragment", handed.pathname === "/family/confirm" && handed.search === "" && handed.hash === `#token=${"t".repeat(43)}`);
+check("reissued link has a local QR", document.querySelector("#confirmation-qr").src?.startsWith("data:image/gif;base64,"));
+check("confirmation panel is visible", document.querySelector("#confirmation-output").hidden === false);
 
 if (failures.length) {
   console.error(failures.join("\n"));

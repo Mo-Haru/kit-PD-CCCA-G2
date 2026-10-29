@@ -8,10 +8,9 @@ import uuid
 from datetime import timedelta
 
 from flask import current_app
-from sqlalchemy import or_, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError
 
-from app.contact_hash import HASH_VERSION, ContactHashKeyError, address_hmac
 from app.crypto_contract import CRYPTO_VERSION, HPKE_SUITE
 from app.extensions import db
 from app.models import (
@@ -40,7 +39,10 @@ from app.services.support import (
 )
 
 OPEN_FIELDS = {"kind"}
-EMAIL_FIELDS = {"kind", "email"}
+# 紛らわしい 0/O、1/I/L を除いた31文字。8文字で約39ビット。
+CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+CODE_LENGTH = 8
+CONFIRM_PATH = "/family/confirm"
 SHARE_FIELDS = {"id", "connection_id", "recipient_key_id", "expires_at", "confirmed", "version", "owner_copy"}
 UPDATE_FIELDS = {"expected_version", "recipient_key_id", "confirmed", "version", "owner_copy"}
 
@@ -71,10 +73,28 @@ def _invitation_view(row: FamilyInvitation, viewer_id: str) -> dict:
     }
 
 
+OPEN_STATES = ("pending", "awaiting_sender")
+
+
+def _transition(invitation_id: str, *conditions, **values) -> bool:
+    """招待の状態変化は、すべて条件付きUPDATE1回で行う。条件に合った1件だけが変わる。
+
+    読んでから書くと、同時の承認・再発行・取り消しが互いの結果を上書きするため。
+    PostgreSQLは行ロックと条件の再評価、SQLiteは書き込みロックで直列になる。
+    """
+    changed = db.session.execute(
+        update(FamilyInvitation).where(FamilyInvitation.id == invitation_id, *conditions).values(**values)
+        .execution_options(synchronize_session=False)
+    ).rowcount
+    return changed == 1
+
+
 def _expire_invitation(row: FamilyInvitation) -> None:
-    if row.status in {"pending", "awaiting_sender"} and row.expires_at <= utcnow():
-        row.status = "expired"
-        row.resolved_at = utcnow()
+    if row.status in OPEN_STATES and row.expires_at <= utcnow():
+        now = utcnow()
+        _transition(row.id, FamilyInvitation.status.in_(OPEN_STATES), FamilyInvitation.expires_at <= now,
+                    status="expired", resolved_at=now)
+        db.session.refresh(row)
 
 
 def create_invitation(body: dict) -> dict:
@@ -82,16 +102,10 @@ def create_invitation(body: dict) -> dict:
     enforce_rate("invite")
     user, session_row, _passkey = load_login()
     require_reauth(session_row)
-    kind = body.get("kind")
-    if kind == "open":
-        expect_fields(body, OPEN_FIELDS)
-        address = None
-    elif kind == "email":
-        expect_fields(body, EMAIL_FIELDS)
-        # 登録の有無で応答を分けない。未登録でも接続は作らず、同じ形の招待だけを返す。
-        address = _email_hash(body.get("email"))
-    else:
+    # メール招待は相手のアドレスを知る必要があり、照合値もサーバーに残るため受け付けない。
+    if body.get("kind") != "open":
         fail("invalid_invitation", 400, "招待の種類が正しくありません。", actor_id=user.id)
+    expect_fields(body, OPEN_FIELDS)
     pending = db.session.query(FamilyInvitation).filter(
         FamilyInvitation.sender_user_id == user.id,
         FamilyInvitation.status.in_(("pending", "awaiting_sender")),
@@ -102,10 +116,8 @@ def create_invitation(body: dict) -> dict:
     token = secrets.token_bytes(32)
     row = FamilyInvitation(
         sender_user_id=user.id,
-        kind=kind,
+        kind="open",
         token_hash=hashlib.sha256(token).digest(),
-        address_hash=address,
-        address_hash_version=None if address is None else HASH_VERSION,
         status="pending",
         expires_at=now + timedelta(seconds=int(current_app.config["INVITATION_TTL_SECONDS"])),
         created_at=now,
@@ -118,23 +130,6 @@ def create_invitation(body: dict) -> dict:
         "token": b64encode(token),
         "invite_path": "/family/invite",
     }
-
-
-def _email_hash(value) -> bytes:
-    try:
-        return address_hmac(value)
-    except ValueError:
-        fail("invalid_email", 400, "メールアドレスの形式が正しくありません。")
-    except ContactHashKeyError:
-        fail("contact_hash_unconfigured", 503, "メール照合の設定が未完了です。")
-
-
-def _owner_of_email(digest: bytes) -> str | None:
-    from app.models import VerifiedContact
-    row = db.session.query(VerifiedContact).filter_by(
-        kind="email", address_hash=digest, address_hash_version=HASH_VERSION,
-    ).one_or_none()
-    return None if row is None else row.user_id
 
 
 def list_invitations() -> dict:
@@ -164,6 +159,36 @@ def _by_token(token: str) -> FamilyInvitation:
     return row
 
 
+def _code_hash(invitation_id: str, code: str) -> bytes:
+    return hashlib.sha256(f"acp/family-confirm-code/v1|{invitation_id}|{code}".encode()).digest()
+
+
+def _normalize_code(value) -> str | None:
+    if not isinstance(value, str):
+        return None
+    code = value.replace("-", "").replace(" ", "").upper()
+    if len(code) != CODE_LENGTH or any(char not in CODE_ALPHABET for char in code):
+        return None
+    return code
+
+
+def _new_confirmation(row: FamilyInvitation) -> tuple[dict, dict]:
+    """申請した人だけに返す確認情報と、保存するハッシュ。前の確認情報は、保存した時点で使えなくなる。"""
+    token = secrets.token_bytes(32)
+    code = "".join(secrets.choice(CODE_ALPHABET) for _ in range(CODE_LENGTH))
+    stored = {
+        "confirm_token_hash": hashlib.sha256(token).digest(),
+        "confirm_code_hash": _code_hash(row.id, code),
+        "confirm_failures": 0,
+    }
+    return stored, {
+        "token": b64encode(token),
+        "code": f"{code[:4]}-{code[4:]}",
+        "confirm_path": CONFIRM_PATH,
+        "expires_at": iso(row.expires_at),
+    }
+
+
 def request_open_invitation(body: dict) -> dict:
     from app.services.support import enforce_rate
     enforce_rate("invite")
@@ -174,71 +199,164 @@ def request_open_invitation(body: dict) -> dict:
         fail("invitation_invalid", 400, "この招待は使えません。", actor_id=user.id)
     if row.sender_user_id == user.id:
         fail("invitation_invalid", 400, "この招待は使えません。", actor_id=user.id)
-    row.status = "awaiting_sender"
-    row.recipient_user_id = user.id
+    stored, confirmation = _new_confirmation(row)
+    # 同じ招待へ同時に申請されても、申請者になれるのは1人だけ。
+    if not _transition(row.id, FamilyInvitation.status == "pending", FamilyInvitation.expires_at > utcnow(),
+                       status="awaiting_sender", recipient_user_id=user.id, **stored):
+        fail("invitation_invalid", 400, "この招待は使えません。", actor_id=user.id)
     audit("invitation_requested", "invitation", row.id, "success", actor_id=user.id)
     db.session.commit()
-    return {"invitation": _invitation_view(row, user.id)}
+    db.session.refresh(row)
+    return {"invitation": _invitation_view(row, user.id), "confirmation": confirmation}
 
 
-def accept_email_invitation(body: dict) -> dict:
+def reissue_confirmation(invitation_id: str) -> dict:
+    """申請した人が確認リンクとコードを作り直す。画面を閉じた後や、コードを間違えられた後に使う。"""
     from app.services.support import enforce_rate
     enforce_rate("invite")
-    expect_fields(body, {"token"})
     user, _session, _passkey = load_login()
-    row = _by_token(body.get("token"))
-    if row.kind != "email" or row.status != "pending" or row.address_hash is None:
-        fail("invitation_invalid", 400, "この招待は使えません。", actor_id=user.id)
-    owner_id = _owner_of_email(row.address_hash)
-    if owner_id is None or owner_id != user.id or row.sender_user_id == user.id:
-        fail("recipient_mismatch", 403, "この招待を受けられるアカウントではありません。",
-             action="invitation_accept", target_type="invitation", target_id=row.id, actor_id=user.id)
-    connection = _connect(row, user.id)
-    audit("invitation_accepted", "connection", connection.id, "success", actor_id=user.id)
+    row = db.session.get(FamilyInvitation, invitation_id)
+    if row is None or row.recipient_user_id != user.id:
+        fail("not_found", 404, "招待が見つかりません。", actor_id=user.id)
+    stored, confirmation = _new_confirmation(row)
+    # 承認・取り消しと同時でも、まだ確認待ちのときだけ差し替える。
+    if not _transition(row.id, FamilyInvitation.recipient_user_id == user.id,
+                       FamilyInvitation.status == "awaiting_sender", FamilyInvitation.expires_at > utcnow(),
+                       **stored):
+        db.session.rollback()
+        _expire_invitation(row)
+        db.session.commit()
+        fail("invitation_invalid", 400, "確認待ちの申請ではありません。", actor_id=user.id)
+    audit("invitation_confirmation_issued", "invitation", row.id, "success", actor_id=user.id)
     db.session.commit()
-    return {"connection_id": connection.id}
+    db.session.refresh(row)
+    return {"invitation": _invitation_view(row, user.id), "confirmation": confirmation}
 
 
-def confirm_invitation(invitation_id: str) -> dict:
+def _explain_unconfirmable(row: FamilyInvitation | None, user_id: str):
+    """承認の条件付き更新が当たらなかった理由を、最新の行から返す。"""
+    if row is None or row.sender_user_id != user_id:
+        fail("not_found", 404, "招待が見つかりません。", actor_id=user_id)
+    db.session.refresh(row)
+    _expire_invitation(row)
+    db.session.commit()
+    if row.status == "cancelled" and row.confirm_failures >= int(current_app.config["FAMILY_CONFIRM_MAX_FAILURES"]):
+        fail("confirmation_locked", 409,
+             "確認コードを続けて間違えたため、この申請を無効にしました。招待からやり直してください。",
+             actor_id=user_id)
+    if row.status != "awaiting_sender" or row.recipient_user_id is None:
+        fail("invitation_invalid", 400, "承認待ちの招待ではありません。", actor_id=user_id)
+    if row.confirm_token_hash is None or row.confirm_code_hash is None:
+        fail("confirmation_required", 409,
+             "この申請には確認コードがありません。申請した家族に、家族画面で確認コードを再発行してもらってください。",
+             actor_id=user_id)
+
+
+def _accept(row: FamilyInvitation, user_id: str, proof) -> dict | None:
+    """確認情報が今も一致し、確認待ちのときだけ承認済みにし、同じトランザクションで接続を作る。
+
+    proofは確認コードまたは確認リンクのハッシュの一致条件。再発行・取り消しと同時でも、どちらか一方だけが成功する。
+    """
+    now = utcnow()
+    recipient_id = row.recipient_user_id
+    if recipient_id is None or not _transition(
+        row.id, FamilyInvitation.sender_user_id == user_id, FamilyInvitation.status == "awaiting_sender",
+        FamilyInvitation.recipient_user_id == recipient_id, FamilyInvitation.expires_at > now, proof,
+        status="accepted", resolved_at=now, confirm_token_hash=None, confirm_code_hash=None,
+    ):
+        db.session.rollback()
+        return None
+    if recipient_id == user_id:
+        fail("invitation_invalid", 400, "この招待は使えません。")
+    if _active_connection_between(user_id, recipient_id) is not None:
+        fail("already_connected", 409, "すでに接続されています。")
+    low, high = _pair(user_id, recipient_id)
+    connection = FamilyConnection(invitation_id=row.id, user_low_id=low, user_high_id=high,
+                                  status="active", connected_at=now)
+    db.session.add(connection)
+    audit("invitation_confirmed", "connection", connection.id, "success", actor_id=user_id)
+    try:
+        db.session.commit()
+    except IntegrityError as exc:
+        db.session.rollback()
+        fail("invitation_invalid", 409, "この招待は使えません。")
+        raise exc
+    recipient = db.session.get(User, recipient_id)
+    return {"connection_id": connection.id,
+            "recipient_display_name": None if recipient is None else recipient.display_name}
+
+
+def _count_failure(row: FamilyInvitation, user_id: str) -> None:
+    """誤入力を、確認待ちで上限未満のときだけDB上で1つ加算する。上限に達したらその場で申請を無効にする。"""
+    limit = int(current_app.config["FAMILY_CONFIRM_MAX_FAILURES"])
+    counted = _transition(
+        row.id, FamilyInvitation.sender_user_id == user_id, FamilyInvitation.status == "awaiting_sender",
+        FamilyInvitation.confirm_code_hash.is_not(None), FamilyInvitation.confirm_failures < limit,
+        FamilyInvitation.expires_at > utcnow(),
+        confirm_failures=FamilyInvitation.confirm_failures + 1,
+    )
+    if not counted:
+        db.session.rollback()
+        _explain_unconfirmable(row, user_id)
+        fail("invitation_invalid", 400, "承認待ちの招待ではありません。", actor_id=user_id)
+    # 加算した行は、このトランザクションがコミットするまで他から書き換えられない。
+    failures = db.session.execute(
+        select(FamilyInvitation.confirm_failures).where(FamilyInvitation.id == row.id)
+    ).scalar_one()
+    if failures >= limit:
+        _transition(row.id, FamilyInvitation.status == "awaiting_sender",
+                    status="cancelled", resolved_at=utcnow(), confirm_token_hash=None, confirm_code_hash=None)
+        audit("invitation_confirmation_locked", "invitation", row.id, "failure", "confirmation_locked", user_id)
+        db.session.commit()
+        fail("confirmation_locked", 409,
+             "確認コードを続けて間違えたため、この申請を無効にしました。招待からやり直してください。",
+             actor_id=user_id)
+    remaining = limit - failures
+    audit("invitation_confirmation_mismatch", "invitation", row.id, "failure", "confirmation_mismatch", user_id)
+    db.session.commit()
+    fail("confirmation_mismatch", 400,
+         f"確認コードが一致しません。あと{remaining}回間違えると、この申請は無効になります。",
+         actor_id=user_id, details={"remaining": remaining})
+
+
+def confirm_invitation(invitation_id: str, body: dict) -> dict:
+    """招待した人が、申請した家族から受け取った確認コードで承認する。"""
+    expect_fields(body, {"code"})
     user, session_row, _passkey = load_login()
     require_reauth(session_row)
     row = db.session.get(FamilyInvitation, invitation_id)
     if row is None or row.sender_user_id != user.id:
         fail("not_found", 404, "招待が見つかりません。", actor_id=user.id)
-    _expire_invitation(row)
-    if row.status != "awaiting_sender" or row.recipient_user_id is None:
-        fail("invitation_invalid", 400, "承認待ちの招待ではありません。", actor_id=user.id)
-    connection = _connect(row, row.recipient_user_id)
-    audit("invitation_confirmed", "connection", connection.id, "success", actor_id=user.id)
-    db.session.commit()
-    return {"connection_id": connection.id}
+    code = _normalize_code(body.get("code"))
+    if code is not None:
+        # 一致の確認も更新の条件に入れる。読んだ時点の値と比べると、再発行後の古いコードで承認できてしまう。
+        accepted = _accept(row, user.id, FamilyInvitation.confirm_code_hash == _code_hash(row.id, code))
+        if accepted is not None:
+            return accepted
+    _count_failure(row, user.id)
 
 
-def _connect(row: FamilyInvitation, recipient_id: str) -> FamilyConnection:
-    if recipient_id == row.sender_user_id:
-        fail("invitation_invalid", 400, "この招待は使えません。")
-    if _active_connection_between(row.sender_user_id, recipient_id) is not None:
-        fail("already_connected", 409, "すでに接続されています。")
-    now = utcnow()
-    row.status = "accepted"
-    row.recipient_user_id = recipient_id
-    row.resolved_at = now
-    low, high = _pair(row.sender_user_id, recipient_id)
-    connection = FamilyConnection(
-        invitation_id=row.id,
-        user_low_id=low,
-        user_high_id=high,
-        status="active",
-        connected_at=now,
-    )
-    db.session.add(connection)
+def confirm_invitation_link(body: dict) -> dict:
+    """招待した人が、申請した家族から受け取った確認リンクを開いて承認する。"""
+    from app.services.support import enforce_rate
+    enforce_rate("invite")
+    expect_fields(body, {"token"})
+    user, session_row, _passkey = load_login()
+    require_reauth(session_row)
     try:
-        db.session.flush()
-    except IntegrityError as exc:
-        db.session.rollback()
-        fail("invitation_invalid", 409, "この招待は使えません。")
-        raise exc
-    return connection
+        raw = b64decode(body.get("token"), exact=32)
+    except Exception:
+        fail("invitation_invalid", 400, "確認リンクを確認できません。", actor_id=user.id)
+    token_hash = hashlib.sha256(raw).digest()
+    row = db.session.query(FamilyInvitation).filter_by(confirm_token_hash=token_hash).one_or_none()
+    # 別のアカウントで開いた場合も、招待の有無を区別しない。
+    if row is None or row.sender_user_id != user.id:
+        fail("not_found", 404, "招待が見つかりません。", actor_id=user.id)
+    accepted = _accept(row, user.id, FamilyInvitation.confirm_token_hash == token_hash)
+    if accepted is None:
+        # 読んだ後に再発行・承認・取り消しされた。差し替え済みのリンクは見つからない扱いにする。
+        fail("not_found", 404, "招待が見つかりません。", actor_id=user.id)
+    return accepted
 
 
 def reject_invitation(invitation_id: str) -> dict:
@@ -247,15 +365,22 @@ def reject_invitation(invitation_id: str) -> dict:
     if row is None:
         fail("not_found", 404, "招待が見つかりません。", actor_id=user.id)
     _expire_invitation(row)
-    if row.sender_user_id == user.id and row.status in {"pending", "awaiting_sender"}:
-        row.status = "cancelled"
-    elif row.recipient_user_id == user.id and row.status == "awaiting_sender":
-        row.status = "rejected"
+    now = utcnow()
+    # 承認と同時でも、まだ開いている招待だけを閉じる。承認済みを上書きしない。
+    if row.sender_user_id == user.id:
+        closed = _transition(row.id, FamilyInvitation.status.in_(OPEN_STATES),
+                             status="cancelled", resolved_at=now, confirm_token_hash=None, confirm_code_hash=None)
+    elif row.recipient_user_id == user.id:
+        closed = _transition(row.id, FamilyInvitation.status == "awaiting_sender",
+                             FamilyInvitation.recipient_user_id == user.id,
+                             status="rejected", resolved_at=now, confirm_token_hash=None, confirm_code_hash=None)
     else:
+        closed = False
+    if not closed:
         fail("not_found", 404, "招待が見つかりません。", actor_id=user.id)
-    row.resolved_at = utcnow()
     audit("invitation_closed", "invitation", row.id, "success", actor_id=user.id)
     db.session.commit()
+    db.session.refresh(row)
     return {"ok": True, "status": row.status}
 
 
