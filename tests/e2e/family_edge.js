@@ -6,6 +6,9 @@ const path = require("path");
 const { chromium } = require("playwright");
 const OUT = process.argv[2] || fs.mkdtempSync(path.join(os.tmpdir(), "family-edge-"));
 const BASE = process.env.E2E_BASE_URL || "http://localhost:5000";
+// フォームの日時（datetime-local）は、ブラウザの現地時刻で読まれる。
+// このスクリプトの現地時刻とブラウザの時刻帯をそろえ、期限の計算がずれないようにする。
+const TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const results = [];
 
 function record(scenario, check, ok, detail = "") {
@@ -14,7 +17,7 @@ function record(scenario, check, ok, detail = "") {
 }
 
 async function person(browser, name) {
-  const context = await browser.newContext({ viewport: { width: 420, height: 1400 } });
+  const context = await browser.newContext({ viewport: { width: 420, height: 1400 }, timezoneId: TIMEZONE });
   const page = await context.newPage();
   const cdp = await context.newCDPSession(page);
   await cdp.send("WebAuthn.enable");
@@ -257,7 +260,7 @@ async function cards(page, list) {
   await A.page.click("#create-qr");
   await A.page.waitForFunction(() => document.querySelector("#share-url").value.includes("#k="));
   const qrUrl = await A.page.locator("#share-url").inputValue();
-  const viewer = await browser.newContext();
+  const viewer = await browser.newContext({ timezoneId: TIMEZONE });
   const view = await viewer.newPage();
   await view.route(/\/api\/v1\/(qr-shares\/.*\/start|qr-view\/current)/, async route => {
     await new Promise(r => setTimeout(r, 2500)); await route.continue();
@@ -290,7 +293,8 @@ async function cards(page, list) {
   let cReceived = await cards(C.page, "received");
   record(S2, "期限内は、Cが受け取った共有を開ける", cReceived.some(card => card.state === "active"), JSON.stringify(cReceived));
   const shareId = await C.page.evaluate(async () => (await (await fetch("/api/v1/family/received")).json()).shares[0].id);
-  const deadline = new Date(expiresLocal + ":00Z").getTime();
+  // expiresLocal は現地時刻（末尾にZを付けない）。画面の toIso() と同じく現地時刻として読む。
+  const deadline = new Date(`${expiresLocal}:00`).getTime();
   const wait = Math.max(0, deadline - Date.now()) + 5000;
   console.log(`期限（${expiresLocal}）まで ${Math.round(wait / 1000)} 秒待つ`);
   await C.page.waitForTimeout(wait);
