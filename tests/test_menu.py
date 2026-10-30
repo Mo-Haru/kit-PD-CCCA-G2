@@ -32,6 +32,7 @@ SHARED_PAGES = (
     ("/sharing", 200, "/sharing"),
     ("/family", 200, "/family"),
     ("/family/invite", 200, "/family"),
+    ("/family/share", 200, "/family"),
     ("/transfer", 200, "/transfer"),
     ("/view/layout-check", 200, None),
     ("/missing-menu-layout", 404, None),
@@ -227,12 +228,11 @@ def assert_shared_layout(markup, current_href, *, account_page=False):
             roles = (element.attrs.get("role") or "").lower().split()
             assert not APPLICATION_MENU_ROLES.intersection(roles), "Use navigation, not application-menu roles"
     footer = only(markup.tagged("footer"), "footer")
-    banner = only(
-        [element for element in markup.elements
-         if "banner" in (element.attrs.get("class") or "").split()],
-        "development banner",
-    )
-    for element in (main, footer, banner):
+    # お知らせの帯は、お知らせを持つ画面（/answers/demo など）にだけ出る。
+    banners = [element for element in markup.elements
+               if "banner" in (element.attrs.get("class") or "").split()]
+    assert len(banners) <= 1, f"Expected at most one development banner, found {len(banners)}"
+    for element in (main, footer, *banners):
         assert content in element.ancestors, f"{element.tag} must be inside #site-content"
     markup.module_script(MENU_SCRIPT)
     markup.module_script(HEADER_SCRIPT)
@@ -354,3 +354,31 @@ def test_strict_markup_accepts_raw_script_and_style_contents():
           const notAnEndTag = '</button>';
         }
       </script></body></html>""")
+
+
+def test_development_banner_only_on_pages_with_a_notice(client):
+    assert 'class="banner"' not in client.get("/sharing").get_data(as_text=True)
+    assert "回答の入力画面は未実装です" not in client.get("/").get_data(as_text=True)
+    demo = client.get("/answers/demo").get_data(as_text=True)
+    assert 'class="banner"' in demo
+    assert "ダミー質問を使う保存・共有のテスト画面です" in demo
+
+
+@pytest.mark.parametrize("path,title", [
+    ("/", "ホーム"),
+    ("/answers", "回答"),
+    ("/answers/demo", "回答画面のテスト"),
+    ("/sharing", "共有"),
+    ("/family", "家族共有"),
+    ("/family/invite", "家族からの招待"),
+    ("/family/share", "家族に共有する"),
+    ("/transfer", "端末移行"),
+    ("/view/layout-check", "QRの閲覧"),
+    ("/missing-menu-layout", "ページが見つかりません"),
+])
+def test_page_title_is_a_breadcrumb_next_to_the_app_name(client, path, title):
+    body = client.get(path).get_data(as_text=True)
+    assert f"<title>{title} | 意思の記録</title>" in body
+    header = body.split("</header>")[0]
+    assert 'class="brand"' in header and header.index('class="brand"') < header.index("breadcrumb-current")
+    assert f'<li class="breadcrumb-current" aria-current="page">{title}</li>' in header

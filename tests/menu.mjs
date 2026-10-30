@@ -123,7 +123,7 @@ class Element extends Events {
   }
 }
 
-async function scenario({ wide = true, missing = [] } = {}) {
+async function scenario({ wide = true, missing = [], stored, storage = "ok" } = {}) {
   const document = new Events();
   document.children = [];
   document.blockedFocus = [];
@@ -179,12 +179,19 @@ async function scenario({ wide = true, missing = [] } = {}) {
     assert.equal(query, media.media);
     return media;
   };
+  // ページを移動しても保つ、広い画面の開閉。保存できない環境も試す。
+  const saved = new Map(stored === undefined ? [] : [["menuOpen", stored]]);
+  if (storage === "throws") {
+    Object.defineProperty(window, "localStorage", { get() { throw new Error("blocked"); } });
+  } else {
+    window.localStorage = { getItem: (key) => saved.get(key) ?? null, setItem: (key, value) => { saved.set(key, value); } };
+  }
   const context = createContext({ document, window });
   const entry = new SourceTextModule(source, { context, identifier: sourceUrl.href });
   await entry.link((specifier) => assert.fail(`Unexpected menu dependency: ${specifier}`));
   await entry.evaluate({ timeout: 1000 });
   return {
-    document, window, media, mediaQueries, toggle, menu, layout, close, backdrop,
+    document, window, media, mediaQueries, saved, toggle, menu, layout, close, backdrop,
     accountLink, menuAccountLink, title, links, linkLabel, outside,
     background: [skip, header, content].filter((element) => document.documentElement.contains(element)),
     setWide(value) {
@@ -211,8 +218,9 @@ function assertState(page, open) {
   assert.equal(page.toggle.getAttribute("aria-expanded"), String(open));
   assert.equal(page.close.hidden, wide);
   assert.equal(page.menu.hidden, false, "closed menus must remain rendered for the slide animation");
-  assert.equal(page.menu.inert, !open);
-  assert.equal(page.menu.getAttribute("aria-hidden"), open ? null : "true");
+  // 広い画面では、閉じても、アイコンだけのレールが残る（操作できる）。
+  assert.equal(page.menu.inert, !open && !wide);
+  assert.equal(page.menu.getAttribute("aria-hidden"), open || wide ? null : "true");
   assert.equal(page.menu.getAttribute("aria-labelledby"), "site-menu-title");
   assert.equal(page.menu.getAttribute("role"), modal ? "dialog" : null);
   assert.equal(page.menu.getAttribute("aria-modal"), modal ? "true" : null);
@@ -238,6 +246,53 @@ await test("desktop starts expanded and toggles without modal side effects", asy
   page.toggle.click();
   assertState(page, true);
   assertFocused(page, page.toggle);
+});
+
+await test("desktop closed menu keeps an icon-only rail whose links stay usable", async () => {
+  const page = await scenario();
+  page.linkLabel.classList.add("nav-label");
+  page.linkLabel.textContent = "ホーム";
+  page.toggle.click();
+  assertState(page, false);
+  assert.equal(page.menu.inert, false, "rail links must stay reachable");
+  assert.equal(page.links[0].getAttribute("title"), "ホーム", "the label becomes a tooltip");
+  page.links[1].focus();
+  page.toggle.click();
+  assertState(page, true);
+  assert.equal(page.links[0].getAttribute("title"), null);
+  // 狭い画面で閉じたドロワーは、これまでどおり操作できない。
+  page.setWide(false);
+  assertState(page, false);
+  assert.equal(page.menu.inert, true);
+  assert.equal(page.links[0].getAttribute("title"), null);
+});
+
+await test("desktop open/closed choice is saved and survives moving to another page", async () => {
+  const first = await scenario();
+  first.toggle.click();
+  assert.equal(first.saved.get("menuOpen"), "false");
+  // 次のページ：保存した「閉じた」から始まる。
+  const closed = await scenario({ stored: first.saved.get("menuOpen") });
+  assertState(closed, false);
+  closed.toggle.click();
+  assert.equal(closed.saved.get("menuOpen"), "true");
+  assertState(await scenario({ stored: closed.saved.get("menuOpen") }), true);
+});
+
+await test("a collapsed desktop choice does not open or close the narrow drawer", async () => {
+  const narrow = await scenario({ wide: false, stored: "false" });
+  assertState(narrow, false);
+  openDrawer(narrow);
+  assert.equal(narrow.saved.get("menuOpen"), "false", "the drawer must not overwrite the desktop choice");
+  narrow.setWide(true);
+  assertState(narrow, false);
+});
+
+await test("menu still works when storage is blocked", async () => {
+  const page = await scenario({ storage: "throws" });
+  assertState(page, true);
+  page.toggle.click();
+  assertState(page, false);
 });
 
 await test("narrow initial state is closed without stealing focus or locking the background", async () => {

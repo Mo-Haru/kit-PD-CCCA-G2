@@ -10,6 +10,11 @@ def family():
     return render_template("family/index.html")
 
 
+@bp.get("/family/share", strict_slashes=False)
+def family_share():
+    return render_template("family/share.html")
+
+
 @bp.get("/family/invite", strict_slashes=False)
 def family_invite():
     return render_template("family/invite.html")

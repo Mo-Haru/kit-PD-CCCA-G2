@@ -66,7 +66,8 @@ export async function api(path, options = {}) {
     headers.set("Content-Type", "application/json");
     body = JSON.stringify(options.body);
   }
-  const response = await fetch(path, { method, headers, body, credentials: "same-origin" });
+  // keepalive は、ページを閉じる直前の要求（QR閲覧の取り消しなど）を最後まで送るため。
+  const response = await fetch(path, { method, headers, body, credentials: "same-origin", keepalive: Boolean(options.keepalive) });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new Error(payload.message || "操作できませんでした。");
