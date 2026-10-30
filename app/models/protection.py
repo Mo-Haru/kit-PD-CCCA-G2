@@ -99,6 +99,8 @@ class RateLimitBucket(Model):
     bucket_key: Mapped[str] = mapped_column(String(64), primary_key=True)
     window_started_at: Mapped[datetime] = mapped_column(UTCDateTime())
     hit_count: Mapped[int] = mapped_column(Integer, default=0)
+    # 今の窓で断った回数。監査ログは窓ごとに最初の1回だけ残し、残りはこの数にまとめる。
+    denied_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
 
 class ShareQuotaLock(Model):

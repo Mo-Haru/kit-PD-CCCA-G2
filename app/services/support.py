@@ -264,7 +264,7 @@ def take_rate(scope: str, ident: str | None = None, message: str = RATE_MESSAGE)
         # 窓が切れていれば、この要求を1回目として窓を作り直す。同時に来ても条件に合うのは1件だけ。
         taken = db.session.execute(
             update(table).where(table.bucket_key == key, table.window_started_at <= start)
-            .values(window_started_at=now, hit_count=1)
+            .values(window_started_at=now, hit_count=1, denied_count=0)
         ).rowcount
         if not taken:
             taken = db.session.execute(
@@ -273,8 +273,38 @@ def take_rate(scope: str, ident: str | None = None, message: str = RATE_MESSAGE)
                 .values(hit_count=table.hit_count + 1)
             ).rowcount
     if taken != 1:
-        fail("rate_limited", 429, message,
-             action="rate_limited", target_type="rate_limit", target_id=scope)
+        _deny_rate(scope, key, now, start, message)
+
+
+def _deny_rate(scope: str, key: str, now, start, message: str) -> None:
+    """断った回数をバケットに数え、監査ログは窓ごとに最初の1回だけ残す。
+
+    断るたびに監査ログを1行足すと、上限に達した後も小さな要求を送り続けるだけでDBを増やせるため。
+    どの要求が「窓の最初の拒否」かは、断った回数を0から1へ変えた条件付きUPDATEの件数で決める
+    （数を読んで判断すると、期限切れの窓や同時の拒否で取り違える）。
+    呼び出し側の途中の変更は残さない（先にロールバックしてから、数えた結果だけをコミットする）。
+    """
+    db.session.rollback()
+    bucket = RateLimitBucket
+    # 窓が切れていれば、この拒否を新しい窓の最初の拒否として窓を作り直す（上限0では許可で作り直されないため）。
+    first = db.session.execute(
+        update(bucket).where(bucket.bucket_key == key, bucket.window_started_at <= start)
+        .values(window_started_at=now, hit_count=0, denied_count=1)
+    ).rowcount == 1
+    if not first:
+        first = db.session.execute(
+            update(bucket).where(bucket.bucket_key == key, bucket.window_started_at > start, bucket.denied_count == 0)
+            .values(denied_count=1)
+        ).rowcount == 1
+    if not first:
+        db.session.execute(
+            update(bucket).where(bucket.bucket_key == key, bucket.window_started_at > start)
+            .values(denied_count=bucket.denied_count + 1)
+        )
+    if first:
+        audit("rate_limited", "rate_limit", scope, "failure", "rate_limited")
+    db.session.commit()
+    raise ApiError("rate_limited", 429, message)
 
 
 def enforce_rate(scope: str, ident: str | None = None, message: str = RATE_MESSAGE) -> None:
