@@ -40,8 +40,10 @@ function page({ resume = false, stage = null, failEnd = false, sessionBeforeStar
     if (stage === name) { reached.resolve(); await gate.promise; }
   }
   let started = sessionBeforeStart;
-  async function call(path) {
+  const cancels = [];
+  async function call(path, options = {}) {
     calls.push(path);
+    if (path === `/api/v1/qr-shares/${shareId}/cancel`) { cancels.push(options); return { ok: true }; }
     if (path === `/api/v1/qr-shares/${shareId}/start`) {
       await pause("start");
       started = true;
@@ -67,7 +69,7 @@ function page({ resume = false, stage = null, failEnd = false, sessionBeforeStar
     navigation: { replaceState() {} },
     decrypt: async () => { await pause("decrypt"); return payload; },
   });
-  return { nodes, storage, gate, reached, endGate, calls };
+  return { nodes, storage, gate, reached, endGate, calls, cancels };
 }
 
 // Both explicit opening and automatic resumption must ignore every late boundary,
@@ -130,6 +132,11 @@ for (const lateError of [false, true]) {
   const opening = test.nodes.open.fire("click");
   await test.reached.promise;
   const ending = test.nodes.end.fire("click");
+  // 開始の応答より前に、サーバーへ試行の取り消しを送る（ページを閉じても届くよう keepalive）。
+  assert.equal(test.cancels.length, 1);
+  assert.equal(test.cancels[0].keepalive, true);
+  assert.equal(test.cancels[0].body.start_token, bytesToB64url(new Uint8Array(32).fill(2)));
+  assert.ok(typeof test.cancels[0].body.attempt_id === "string" && test.cancels[0].body.attempt_id.length >= 43);
   test.endGate.resolve();
   await ending;
   const endsBeforeStart = test.calls.filter(path => path === "/api/v1/qr-view/end").length;

@@ -156,6 +156,8 @@ export function bindQrViewPage(root, {
   let generation = 0;
   let ended = false;
   let busy = false;
+  // このページで開始を送った試行。終了時にサーバー側で取り消す。
+  let attempted = null;
   const isCurrent = ticket => !ended && ticket === generation;
   const locationLike = {
     hash: address.hash,
@@ -197,6 +199,7 @@ export function bindQrViewPage(root, {
     if (busy || ended) return;
     const ticket = ++generation;
     busy = true;
+    if (secrets) attempted = { startToken: bytesToB64url(secrets.startToken), attempt: secrets.attempt };
     const openButton = node("open");
     openButton.disabled = true;
     try {
@@ -267,6 +270,13 @@ export function bindQrViewPage(root, {
     if (ended) return;
     ended = true;
     generation += 1;
+    // 開始の応答がまだでも、サーバーに試行の取り消しを残す。このあとページを閉じても、
+    // 遅れて届いた開始でセッションが作られない（作られていれば失効する）。
+    const cancelling = attempted
+      ? call(`/api/v1/qr-shares/${shareId}/cancel`, {
+        method: "POST", body: { start_token: attempted.startToken, attempt_id: attempted.attempt }, keepalive: true,
+      }).catch(() => {})
+      : Promise.resolve();
     clearQrSecrets(storage);
     storage.removeItem(OPENED);
     output.replaceChildren();
@@ -274,7 +284,7 @@ export function bindQrViewPage(root, {
     node("updated").textContent = "";
     for (const id of ["open", "reopen", "end"]) node(id).disabled = true;
     show("閲覧を終了し、この端末に置いた秘密を消しました。");
-    await endOnServer();
+    await Promise.all([cancelling, endOnServer()]);
   });
 }
 
