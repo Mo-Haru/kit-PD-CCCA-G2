@@ -134,6 +134,34 @@ header {
   text-decoration: none;
 }
 
+.breadcrumb {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.breadcrumb > li {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.breadcrumb > li + li::before {
+  content: "›";
+  padding-inline: 8px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.breadcrumb-current {
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-title-large-size);
+  line-height: var(--md-sys-typescale-title-large-line-height);
+}
+
 .header-account {
   display: flex;
   flex-wrap: wrap;
@@ -864,11 +892,18 @@ footer p {
     padding-inline: 12px;
   }
 
-  .brand {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .breadcrumb {
+    flex: 1 1 auto;
+  }
+
+  /* 狭い画面では、アプリ名を縮めて、ページ名を優先して残す。 */
+  .breadcrumb > li:first-child {
+    flex: 0 1 auto;
+  }
+
+  .breadcrumb-current {
+    flex: 0 0 auto;
+    max-width: 60%;
   }
 
   .header-account {

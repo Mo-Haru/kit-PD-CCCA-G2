@@ -1,8 +1,8 @@
 import {
-  api, createFamilyShare, getUnlockState, loadAnswerDocument, openOwnerCopy, openReceivedShare, unlock,
-  updateFamilyShare,
+  api, getUnlockState, loadAnswerDocument, openOwnerCopy, openReceivedShare, unlock,
 } from "./client.mjs";
-import { entriesFromPayload, fillAnswerList, plaintextForSelection, presentAnswer, shareFingerprint } from "./crypto.mjs";
+import { entriesFromPayload, fillAnswerList } from "./crypto.mjs";
+import { toIso } from "./family-share-flow.mjs";
 import qrcode from "../../vendor/qrcode-generator-2.0.4.mjs";
 import { hideConfirmation, showConfirmation } from "./family-confirmation.mjs";
 
@@ -12,10 +12,9 @@ const connections = document.querySelector("#connections");
 const shares = document.querySelector("#shares");
 const received = document.querySelector("#received");
 let catalog = { categories: [], questions: [] };
-let previewKey = "";
 let decryptedAnswers = null;
 let answersReady = false;
-let encrypted = null;
+let hasActiveFamily = false;
 let authenticated = false;
 let unlocking = false;
 let knownUser = null;
@@ -33,28 +32,16 @@ function show(text) {
   if (node("family-detail")?.open) node("family-detail-status").textContent = text;
 }
 
-function scopeVisibility() {
-  const scope = document.querySelector("input[name=scope]:checked")?.value || "questions";
-  node("chapters").hidden = scope !== "chapters";
-  node("questions").hidden = scope !== "questions";
-  node("all-answers").hidden = scope !== "all";
-}
-
 function syncFamilyControls() {
   const ready = authenticated && answersReady && getUnlockState().unlocked;
-  const selection = currentSelection();
-  const hasRange = selection.scope === "all" ? catalog.questions.length > 0 : selection.ids.length > 0;
-  const expires = node("expires-at");
-  const validExpiry = expires.validity?.valid !== false && (!expires.value || new Date(expires.value).getTime() > Date.now());
-  const canPreview = ready && hasRange && Boolean(node("connection").value) && validExpiry;
   const control = node("unlock-here");
   control.textContent = ready ? "解除済み" : unlocking ? "解除中…" : "回答の暗号化を解除";
   control.dataset.unlockState = ready ? "unlocked" : "locked";
   control.disabled = !authenticated || unlocking || ready;
   for (const id of ["invite-open", "invite-qr"]) node(id).disabled = !ready || unlocking;
-  node("show-preview").disabled = !canPreview || unlocking;
-  node("confirm-share").disabled = !ready || !previewKey;
-  node("share").disabled = !ready || !previewKey || !node("confirm-share").checked;
+  // 共有の開始は、共有できる家族がいるときだけ。ロック解除は開始後の画面で行う。
+  node("share-start").disabled = !authenticated || !hasActiveFamily;
+  node("share-start-help").hidden = !authenticated || hasActiveFamily;
 }
 
 function button(label, action) {
@@ -82,45 +69,18 @@ function shareCard(label, state, action) {
   return element;
 }
 
-function checked(selector) {
-  return [...document.querySelectorAll(`${selector} input:checked`)].map((item) => item.value);
-}
-
-function currentSelection() {
-  const scope = document.querySelector("input[name=scope]:checked")?.value;
-  if (scope === "all") return { scope: "all" };
-  if (scope === "chapters") return { scope: "chapters", ids: checked("#chapters") };
-  return { scope: "questions", ids: checked("#questions") };
-}
-
-export function confirmationStillMatches(rememberedKey, selection, payload, context) {
-  return typeof rememberedKey === "string"
-    && rememberedKey !== ""
-    && rememberedKey === shareFingerprint(selection, payload, context);
-}
-
-export function confirmationCoversShare(context, share) {
-  return Boolean(context && context.connectionId && context.recipientKeyId)
-    && context.recipientUserId === share.recipient_user_id
-    && context.connectionId === share.connection_id;
-}
-
 async function syncAccess() {
   const session = await api("/api/v1/auth/session");
   authenticated = session.authenticated;
   if (knownUser && knownUser !== session.user_id) {
     answersReady = false;
     decryptedAnswers = null;
-    encrypted = null;
-    previewKey = "";
-    node("preview-output").replaceChildren();
     node("invite-link").textContent = "";
     node("invite-qr-output").replaceChildren();
     node("invite-output").hidden = true;
     confirmationLink = "";
     hideConfirmation(node);
     closeFamilyDetail();
-    renderCatalog();
     syncFamilyControls();
     throw new Error("アカウントが変わりました。ページを開き直してください。");
   }
@@ -134,141 +94,12 @@ async function syncAccess() {
     const loaded = await loadAnswerDocument();
     decryptedAnswers = loaded.document;
     answersReady = true;
-    renderCatalog();
   }
   node("lock-state").textContent = answersReady
-    ? `${session.display_name} さん：解除済み。家族と共有する回答を確認できます。`
-    : `${session.display_name} さん：回答は暗号化されています。内容の確認と共有には解除が必要です。`;
+    ? `${session.display_name} さん：解除済み。共有された回答や招待を操作できます。`
+    : `${session.display_name} さん：回答は暗号化されています。共有された回答の表示と招待には解除が必要です。`;
   syncFamilyControls();
   return session;
-}
-
-function renderCatalog() {
-  const chapters = document.querySelector("#chapters");
-  const questions = document.querySelector("#questions");
-  const chosenChapters = new Set(checked("#chapters"));
-  const chosenQuestions = new Set(checked("#questions"));
-  chapters.replaceChildren();
-  questions.replaceChildren();
-  node("all-answers").replaceChildren();
-  const seen = new Set();
-  for (const category of catalog.categories || []) {
-    seen.add(category.id);
-    const group = document.createElement("div");
-    group.className = "sharing-chapter";
-    group.append(choice(category.id, category.name || category.id, chosenChapters.has(category.id)));
-    for (const question of catalog.questions.filter(question => question.category_id === category.id)) appendAnswer(group, question);
-    chapters.append(group);
-  }
-  for (const question of catalog.questions || []) {
-    if (!seen.has(question.category_id)) {
-      seen.add(question.category_id);
-      chapters.append(choice(question.category_id, question.category_name || question.category_id, chosenChapters.has(question.category_id)));
-    }
-    const label = choice(question.id, "", chosenQuestions.has(question.id));
-    appendAnswer(label, question);
-    questions.append(label);
-    appendAnswer(node("all-answers"), question);
-  }
-  scopeVisibility();
-  syncFamilyControls();
-}
-
-function appendAnswer(parent, question) {
-  const row = document.createElement("span");
-  row.className = "sharing-answer-row";
-  const title = document.createElement("span");
-  title.className = "sharing-question-title";
-  title.textContent = question.text || question.id;
-  const value = document.createElement("span");
-  value.className = "sharing-answer-value";
-  const ready = answersReady && getUnlockState().unlocked;
-  value.dataset.answerState = ready ? "decrypted" : "encrypted";
-  const answer = presentAnswer(decryptedAnswers?.items?.[question.id]);
-  value.textContent = ready ? (answer.stateLabel === "回答" ? `回答：${answer.valueText}` : answer.stateLabel)
-    : !authenticated ? "ログインして回答を確認" : encrypted?.document === null ? "保存済みの回答はありません"
-      : encrypted?.document ? `暗号化中：${encrypted.document.ciphertext.slice(0, 64)}…` : "回答データを確認しています…";
-  row.append(title, value);
-  parent.append(row);
-}
-
-function choice(value, label, selected) {
-  const row = document.createElement("label");
-  const input = document.createElement("input");
-  input.type = "checkbox";
-  input.value = value;
-  input.checked = selected;
-  row.append(input, document.createTextNode(` ${label}`));
-  return row;
-}
-
-async function loadSharePayload() {
-  if (!getUnlockState().unlocked || !answersReady) throw new Error("先に「回答の暗号化を解除」を押してください。");
-  const opened = await loadAnswerDocument();
-  decryptedAnswers = opened.document;
-  renderCatalog();
-  return plaintextForSelection(opened.document, catalog, currentSelection());
-}
-
-function clearConfirmation() {
-  previewKey = "";
-  const box = document.querySelector("#confirm-share");
-  if (box) box.checked = false;
-  document.querySelector("#preview-output").replaceChildren();
-  syncFamilyControls();
-}
-
-async function currentConfirmation() {
-  const selected = document.querySelector("#connection").value;
-  if (!selected) throw new Error("接続を選んでください。");
-  const connection = JSON.parse(selected);
-  const keys = await api(`/api/v1/encryption-keys/${connection.userId}`);
-  const active = (keys.keys || []).find((item) => item.status === "active");
-  if (!active) throw new Error("相手の受信用公開鍵がありません。");
-  const select = document.querySelector("#connection");
-  const recipientName = select.selectedOptions && select.selectedOptions[0]
-    ? select.selectedOptions[0].textContent
-    : connection.userId;
-  return {
-    connectionId: connection.id,
-    recipientUserId: connection.userId,
-    recipientKeyId: active.id,
-    expiresAt: toIso(document.querySelector("#expires-at").value),
-    recipientName,
-  };
-}
-
-function showConfirmedFacts(context) {
-  const output = document.querySelector("#preview-output");
-  const lines = [
-    `相手：${context.recipientName}`,
-    `鍵：${context.recipientKeyId}`,
-    `期限：${context.expiresAt || "なし"}`,
-  ];
-  for (const line of lines) {
-    const row = document.createElement("p");
-    row.textContent = line;
-    output.append(row);
-  }
-}
-
-async function requireConfirmedPayload() {
-  const payload = await loadSharePayload();
-  const context = await currentConfirmation();
-  if (!confirmationStillMatches(previewKey, currentSelection(), payload, context)) {
-    clearConfirmation();
-    const error = new Error("確認内容が変わったので、もう一度確認してください。相手、期限、鍵、項目を確認し直してください。");
-    error.code = "confirmation_stale";
-    throw error;
-  }
-  return { payload, context };
-}
-
-function toIso(value) {
-  if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) throw new Error("期限の形式が正しくありません。");
-  return date.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 function closeFamilyDetail() {
@@ -359,9 +190,7 @@ function showError(error) {
     needsReauth = true;
     answersReady = false;
     decryptedAnswers = null;
-    previewKey = "";
-    node("preview-output").replaceChildren();
-    renderCatalog();
+    syncFamilyControls();
     if (node("family-detail").open) {
       node("family-detail-body").replaceChildren();
       node("family-detail-unlock").hidden = false;
@@ -381,7 +210,7 @@ async function unlockFamily() {
     answersReady = true;
     needsReauth = false;
     await refresh();
-    show("回答の暗号化を解除しました。家族と共有する内容を確認できます。");
+    show("回答の暗号化を解除しました。");
   } finally { unlocking = false; syncFamilyControls(); }
 }
 
@@ -425,34 +254,12 @@ function buildOwnDetail(share) {
         }
       }));
     }
-    item.append(button("この範囲で更新", async () => {
-      if (!document.querySelector("#confirm-share").checked) {
-        show("更新する項目を確認してからチェックしてください。");
-        return;
-      }
-      try {
-        const confirmed = await requireConfirmedPayload();
-        if (!confirmationCoversShare(confirmed.context, share)) {
-          clearConfirmation();
-          show("確認した相手と接続がこの共有と違います。もう一度確認してください。");
-          return;
-        }
-        await updateFamilyShare({
-          shareId: share.id,
-          expectedVersion: share.current_version,
-          recipientUserId: share.recipient_user_id,
-          recipientKeyId: confirmed.context.recipientKeyId,
-          selection: currentSelection(),
-          payload: confirmed.payload,
-        });
-        clearConfirmation();
-        show("確認した相手と鍵の共有を、確認した項目だけに更新しました。回答を保存しただけでは、この版は変わりません。");
-        await refresh();
-        if (node("family-detail").open && activeDetail?.id === share.id) await openFamilyDetail(share.id, "own");
-      } catch (error) {
-        showError(error);
-      }
-    }));
+    if (share.status !== "stopped" && shareState(share) !== "expired") {
+      // 内容の選び直しと再確認は、共有を開始する画面と同じ手順で行う。
+      item.append(button("内容を選び直して更新", () => {
+        globalThis.location.assign(`/family/share?update=${encodeURIComponent(share.id)}`);
+      }));
+    }
     item.append(button("過去の版", async () => {
       try {
         const history = await api(`/api/v1/family/shares/${share.id}/history`);
@@ -510,8 +317,6 @@ function buildOwnDetail(share) {
 async function refresh() {
   const session = await syncAccess();
   if (!session.authenticated) return;
-  encrypted = await api("/api/v1/answers/current");
-  renderCatalog();
   const [invitationBody, connectionBody, ownBody, receivedBody] = await Promise.all([
     api("/api/v1/family/invitations"),
     api("/api/v1/family/connections"),
@@ -578,9 +383,7 @@ async function refresh() {
     incoming.append(item);
   }
   connections.replaceChildren();
-  const select = document.querySelector("#connection");
-  const previous = select.value;
-  select.replaceChildren();
+  hasActiveFamily = connectionBody.connections.some(connection => connection.status === "active");
   for (const connection of connectionBody.connections) {
     const item = document.createElement("li");
     item.className = "record-card";
@@ -593,10 +396,6 @@ async function refresh() {
     state.setAttribute("aria-label", connection.status === "active" ? "共有できる家族" : "登録解除済み");
     item.append(state, name);
     if (connection.status === "active") {
-      const option = document.createElement("option");
-      option.value = JSON.stringify({ id: connection.id, userId: connection.other_user_id });
-      option.textContent = connection.other_display_name || connection.other_user_id;
-      select.append(option);
       item.append(button("家族から外す", async () => {
         await api(`/api/v1/family/connections/${connection.id}/disconnect`, { method: "POST", body: {} });
         show("家族の登録を解除し、共有を停止しました。相手が保存済みの内容は消せません。");
@@ -605,7 +404,6 @@ async function refresh() {
     }
     connections.append(item);
   }
-  if (previous) select.value = previous;
   shares.replaceChildren();
   for (const share of ownBody.shares) {
     const card = document.createElement("li");
@@ -629,8 +427,9 @@ async function refresh() {
   syncFamilyControls();
 }
 
-if (document.querySelector("#share")) {
+if (document.querySelector("#family-page")) {
   node("unlock-here").addEventListener("click", () => unlockFamily().catch(showError));
+  node("share-start").addEventListener("click", () => globalThis.location.assign("/family/share"));
   node("invite-open").addEventListener("click", () => createInvitation(false).catch(showError));
   node("invite-qr").addEventListener("click", () => createInvitation(true).catch(showError));
   for (const id of ["family-close-top", "family-close-bottom"]) node(id).addEventListener("click", closeFamilyDetail);
@@ -646,13 +445,6 @@ if (document.querySelector("#share")) {
       if (activeDetail) await openFamilyDetail(activeDetail.id, activeDetail.kind);
     } catch (error) { showError(error); node("family-detail-status").textContent = error.message; }
   });
-  for (const input of document.querySelectorAll("input[name=scope]")) input.addEventListener("change", () => {
-    scopeVisibility();
-    clearConfirmation();
-  });
-  for (const id of ["questions", "chapters", "connection", "expires-at"]) node(id).addEventListener("change", clearConfirmation);
-  node("expires-at").addEventListener("input", clearConfirmation);
-  node("confirm-share").addEventListener("change", syncFamilyControls);
   node("copy-confirmation").addEventListener("click", async () => {
     if (!confirmationLink) return;
     try {
@@ -676,46 +468,8 @@ if (document.querySelector("#share")) {
     }
   });
 
-  document.querySelector("#show-preview").addEventListener("click", async () => {
-    try {
-      const payload = await loadSharePayload();
-      const context = await currentConfirmation();
-      fillAnswerList(document.querySelector("#preview-output"), entriesFromPayload(payload, catalog));
-      showConfirmedFacts(context);
-      previewKey = shareFingerprint(currentSelection(), payload, context);
-      syncFamilyControls();
-      show("確認した相手、期限、鍵、項目だけが共有されます。どれかを変えた場合は、もう一度確認してください。");
-    } catch (error) {
-      showError(error);
-    }
-  });
-
-  document.querySelector("#share").addEventListener("click", async () => {
-    if (!document.querySelector("#confirm-share").checked) {
-      show("共有する項目を確認してからチェックしてください。");
-      return;
-    }
-    try {
-      const confirmed = await requireConfirmedPayload();
-      await createFamilyShare({
-        connectionId: confirmed.context.connectionId,
-        recipientUserId: confirmed.context.recipientUserId,
-        recipientKeyId: confirmed.context.recipientKeyId,
-        selection: currentSelection(),
-        payload: confirmed.payload,
-        expiresAt: confirmed.context.expiresAt,
-      });
-      clearConfirmation();
-      show("確認した相手、期限、鍵、項目だけを共有しました。回答を後から保存しても、この共有は自動では変わりません。");
-      await refresh();
-    } catch (error) {
-      showError(error);
-    }
-  });
-
   api("/api/v1/answers/questions").then((body) => {
     catalog = body;
-    renderCatalog();
   }).catch((error) => show(error.message));
 
   refresh().catch((error) => show(error.message));

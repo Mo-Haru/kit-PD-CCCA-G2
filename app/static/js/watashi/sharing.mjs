@@ -7,11 +7,23 @@ const modeLabel = mode => ({ emergency: "緊急用（最初の閲覧のみ）", 
 // サーバーの上限（QR_TIMED_MAX_SECONDS / QR_LONG_MAX_SECONDS）と同じ日数。
 const MAX_DAYS = { timed: 31, long: 1096 };
 
+// datetime-local に入れる形（端末の時刻、分まで）。
+function localInputValue(date) {
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
 export function longExpiryDefault(now = new Date()) {
   const date = new Date(now.getTime());
   date.setFullYear(date.getFullYear() + 3);
   date.setSeconds(0, 0);
-  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  return localInputValue(date);
+}
+
+// 期限として選べる範囲。下限は次の分、上限は切り捨てた分にして、範囲内ならサーバーでも通るようにする。
+export function expiryBounds(mode, now = new Date()) {
+  const min = new Date(now.getTime() + 60000);
+  const max = new Date(now.getTime() + MAX_DAYS[mode] * 86400000);
+  return { min: localInputValue(min), max: localInputValue(max) };
 }
 
 export function qrConfirmationKey(selection, mode, expiresAt, ownerId) {
@@ -46,12 +58,20 @@ export function bindSharingPage(root, client = {
   function isDecrypted() {
     return decrypted && !accountChanged && session?.authenticated && client.getUnlockState().unlocked;
   }
+  // 「共有する内容を確認」を押せない理由。押せるときは空文字。
+  function previewBlocker() {
+    const chosen = selection();
+    if (chosen.scope === "all" ? catalog.questions.length === 0 : chosen.ids.length === 0) {
+      return chosen.scope === "chapters" ? "共有する章を1つ以上選んでください。" : "共有する質問を1つ以上選んでください。";
+    }
+    // 日付だけ入れて時刻が空のときなど、入力の途中は value が空になる。
+    if (node("expires-at").validity?.badInput) return "有効期限の日付と時刻を最後まで入力してください。";
+    if (!node("expires-at").disabled && node("expires-at").value === "") return "有効期限を選んでください。";
+    try { settings(); } catch (error) { return error.message; }
+    return isDecrypted() ? "" : "「回答の暗号化を解除」を押すと、共有する内容を確認できます。";
+  }
   function canPreview() {
-    if (!isDecrypted()) return false;
-    try {
-      const chosen = settings();
-      return chosen.selection.scope === "all" ? catalog.questions.length > 0 : chosen.selection.ids.length > 0;
-    } catch (_error) { return false; }
+    return previewBlocker() === "";
   }
   function controls() {
     const unlocked = Boolean(isDecrypted());
@@ -67,7 +87,10 @@ export function bindSharingPage(root, client = {
         : !session.authenticated ? "ログインすると、回答の暗号化を解除できます。"
           : unlocked ? `${session.display_name} さん：解除済み。回答内容を確認して共有できます。`
             : `${session.display_name} さん：回答は暗号化されています。内容の確認と共有には解除が必要です。`;
-    node("show-preview").disabled = busy || !canPreview();
+    const blocker = session?.authenticated && catalogReady && !accountChanged ? previewBlocker() : "";
+    node("show-preview").disabled = busy || blocker !== "";
+    node("preview-help").textContent = blocker;
+    node("preview-help").hidden = blocker === "";
     node("refresh-shares").disabled = busy || accountChanged || !session?.authenticated;
     node("confirm-share").disabled = !preview;
     node("create-qr").disabled = busy || !unlocked || !preview || !node("confirm-share").checked;
@@ -109,6 +132,11 @@ export function bindSharingPage(root, client = {
     node("expiry-field").hidden = !expiring;
     node("expires-at").disabled = !expiring;
     node("long-warning").hidden = mode !== "long";
+    if (expiring) {
+      const { min, max } = expiryBounds(mode);
+      node("expires-at").min = min;
+      node("expires-at").max = max;
+    }
     if (mode !== shownMode) {
       // 長期は上限の3年後を既定にする。期限付きへ戻したら選び直してもらう。
       node("expires-at").value = mode === "long" ? longExpiryDefault() : "";
@@ -240,10 +268,16 @@ export function bindSharingPage(root, client = {
   }
   node("share-fields").addEventListener("change", event => {
     if (event.target === node("confirm-share")) { controls(); return; }
-    clearPreview();
+    // 先に期限の既定値を入れてから、ボタンを押せるか判定する。
     visibility();
+    clearPreview();
   });
   node("expires-at").addEventListener("input", clearPreview);
+  // 入力の途中は value が空のままで input が起きないので、理由の表示をここで更新する。
+  node("expires-at").addEventListener("keyup", controls);
+  node("expires-at").addEventListener("blur", controls);
+  // 開いたままの画面でも、選べる範囲を今の時刻に合わせる。
+  node("expires-at").addEventListener("focus", visibility);
   async function unlockAnswers() {
     if (isDecrypted()) return;
     unlocking = true;

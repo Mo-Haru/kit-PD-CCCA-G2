@@ -492,7 +492,7 @@ check("failed proof disables the new passkey", proofFailed && disabled.some((pat
 const afterFailure = await loadAnswerDocument();
 check("failed proof leaves the current key usable", afterFailure.document.items.no.state === "declined");
 
-const { confirmationCoversShare, confirmationStillMatches } = await import("../app/static/js/watashi/family.mjs");
+const { confirmationCoversShare, confirmationStillMatches } = await import("../app/static/js/watashi/family-share-flow.mjs");
 const previewSelection = { scope: "questions", ids: ["keep"] };
 const previewPayload = plaintextForSelection(stored, catalog, previewSelection);
 const confirmedContext = {

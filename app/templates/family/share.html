@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block page_title %}家族に共有する{% endblock %}
+{% block extra_head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/morishita.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/answers.css') }}">
+{% endblock %}
+{% block content %}
+  <section class="sensitive answer-demo" id="family-share-page" aria-labelledby="share-title">
+    <h1 id="share-title">家族に共有する</h1>
+    <ol id="share-steps" class="share-steps" aria-label="共有の手順"></ol>
+    <p id="lock-state" role="status" aria-live="polite">状態を確認しています。</p>
+    <p id="status" class="status-message" role="status" aria-live="polite"></p>
+
+    <section id="step-unlock" class="share-step" aria-labelledby="step-unlock-title">
+      <h2 id="step-unlock-title">回答の暗号化を解除</h2>
+      <p class="note">家族に共有する回答を読むため、パスキーで本人確認をして、この端末で回答の暗号化を解除します。</p>
+      <div class="actions">
+        <a id="login-here" class="demo-launch" href="{{ url_for('auth.index', next=url_for('protection_pages.family_share')) }}" hidden>ログイン・新規登録</a>
+        <button id="unlock-here" class="sharing-unlock" type="button" data-unlock-state="locked" disabled>回答の暗号化を解除</button>
+      </div>
+    </section>
+
+    <section id="step-select" class="share-step" aria-labelledby="step-select-title" hidden>
+      <h2 id="step-select-title">共有する内容を選ぶ</h2>
+      <p class="note">選んだ範囲の回答だけが、家族に共有されます。</p>
+      <fieldset class="scope-options">
+        <legend>範囲</legend>
+        <label><input type="radio" name="scope" value="all"> 全体</label>
+        <label><input type="radio" name="scope" value="chapters"> 章</label>
+        <label><input type="radio" name="scope" value="questions" checked> 質問</label>
+      </fieldset>
+      <div id="chapters" class="choice-list" hidden></div>
+      <div id="questions" class="choice-list"></div>
+      <section id="all-answers" aria-label="共有対象の全回答" hidden></section>
+    </section>
+
+    <section id="step-target" class="share-step" aria-labelledby="step-target-title" hidden>
+      <h2 id="step-target-title">共有する家族と期限を決める</h2>
+      <p id="no-family" class="note" hidden>共有できる家族がいません。先に家族画面で家族を招待してください。</p>
+      <div class="md-field md-field--raised">
+        <label class="md-field-label" for="connection">共有する家族</label>
+        <select id="connection" class="md-field-control"></select>
+      </div>
+      <div class="md-field md-field--raised">
+        <label class="md-field-label" for="expires-at">期限</label>
+        <input id="expires-at" class="md-field-control" type="datetime-local" aria-describedby="expires-at-help">
+        <p id="expires-at-help" class="md-field-help">空欄なら期限なし。</p>
+      </div>
+    </section>
+
+    <section id="step-confirm" class="share-step" aria-labelledby="step-confirm-title" hidden>
+      <h2 id="step-confirm-title">共有する内容を再確認する</h2>
+      <p class="note">次の相手・期限・回答だけを共有します。内容を変えたいときは「戻る」を押してください。</p>
+      <div id="preview-output" class="review-output"></div>
+      <label class="confirmation"><input id="confirm-share" type="checkbox" disabled> 表示された家族・期限・回答だけを共有することを確認しました</label>
+    </section>
+
+    <section id="step-done" class="share-step demo-notice" aria-labelledby="step-done-title" hidden>
+      <h2 id="step-done-title">共有しました</h2>
+      <p id="done-text"></p>
+    </section>
+
+    <div class="actions share-nav">
+      <button id="step-back" type="button" hidden>戻る</button>
+      <button id="step-next" class="button-primary" type="button" disabled>次へ</button>
+      <button id="share" class="button-primary" type="button" hidden disabled>共有を確定</button>
+      <a id="back-to-family" class="demo-launch" href="{{ url_for('protection_pages.family') }}">家族画面へ戻る</a>
+    </div>
+  </section>
+  <script type="module" src="{{ url_for('static', filename='js/watashi/family-share.mjs') }}"></script>
+{% endblock %}

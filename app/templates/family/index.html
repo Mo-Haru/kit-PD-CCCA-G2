@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}家族共有 | 意思の記録{% endblock %}
+{% block page_title %}家族共有{% endblock %}
 {% block extra_head %}
   <link rel="stylesheet" href="{{ url_for('static', filename='css/morishita.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/answers.css') }}">
@@ -7,11 +7,21 @@
 {% block content %}
   <div class="sensitive answer-demo" id="family-page">
     <h1>家族共有</h1>
-    <p>共有する回答と家族を確認してから送信します。回答を保存し直しても、発行済みの共有内容は変わりません。</p>
+    <p>家族の一覧と、家族との共有を確認します。共有を作るときは「共有を開始」から、別の画面で内容を確認しながら進めます。回答を保存し直しても、発行済みの共有内容は変わりません。</p>
     <p id="lock-state" role="status" aria-live="polite">状態を確認しています。</p>
     <p id="status" class="status-message" role="status" aria-live="polite"></p>
     <button id="unlock-here" class="sharing-unlock" type="button" data-unlock-state="locked" disabled>回答の暗号化を解除</button>
-    <h2>招待</h2>
+    <h2>家族</h2>
+    <ul id="connections" class="record-list"></ul>
+    <div class="actions">
+      <button id="share-start" class="button-primary" type="button" disabled>共有を開始</button>
+    </div>
+    <p id="share-start-help" class="note" hidden>共有できる家族がいません。下の「家族を招待」から家族を招待してください。</p>
+    <h2>自分が家族に共有したもの</h2>
+    <ul id="shares" class="record-list"></ul>
+    <h2>家族から共有されたもの</h2>
+    <ul id="received" class="record-list"></ul>
+    <h2>家族を招待</h2>
     <div class="actions">
       <button id="invite-open" type="button" disabled>リンクで招待</button>
       <button id="invite-qr" type="button" disabled>QRコードで招待</button>
@@ -24,37 +34,6 @@
     </div>
     <ul id="incoming" class="record-list"></ul>
     {% include "family/_confirmation.html" %}
-    <h2>家族</h2>
-    <ul id="connections" class="record-list"></ul>
-    <h2>共有する範囲</h2>
-    <p class="note">解除前の文字列は、回答全体を暗号化して保存したデータの一部です。</p>
-    <fieldset class="scope-options">
-      <legend>範囲</legend>
-      <label><input type="radio" name="scope" value="all"> 全体</label>
-      <label><input type="radio" name="scope" value="chapters"> 章</label>
-      <label><input type="radio" name="scope" value="questions" checked> 質問</label>
-    </fieldset>
-    <div id="chapters" class="choice-list" hidden></div>
-    <div id="questions" class="choice-list"></div>
-    <section id="all-answers" aria-label="共有対象の全回答" hidden></section>
-    <h2>共有を作る</h2>
-    <div class="md-field md-field--raised">
-      <label class="md-field-label" for="connection">共有する家族</label>
-      <select id="connection" class="md-field-control"></select>
-    </div>
-    <div class="md-field md-field--raised">
-      <label class="md-field-label" for="expires-at">期限</label>
-      <input id="expires-at" class="md-field-control" type="datetime-local" aria-describedby="expires-at-help">
-      <p id="expires-at-help" class="md-field-help">空欄なら期限なし。</p>
-    </div>
-    <button id="show-preview" type="button" disabled>共有する内容を確認</button>
-    <div id="preview-output"></div>
-    <label class="confirmation"><input id="confirm-share" type="checkbox" disabled> 表示された家族・期限・回答だけを共有することを確認しました</label>
-    <button id="share" class="button-primary" type="button" disabled>共有を確定</button>
-    <h2>自分が家族に共有したもの</h2>
-    <ul id="shares" class="record-list"></ul>
-    <h2>家族から共有されたもの</h2>
-    <ul id="received" class="record-list"></ul>
     <dialog id="family-detail" class="share-dialog" aria-labelledby="family-detail-title">
       <div class="share-dialog-shell">
         <div class="share-dialog-header">

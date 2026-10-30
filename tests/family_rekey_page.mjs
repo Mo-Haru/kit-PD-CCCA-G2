@@ -1,5 +1,5 @@
 /**
- * 家族画面で、同じ相手の共有を現在の新しい鍵で確認してから更新する。
+ * 家族画面で、共有の一覧・開始・詳細・招待・確認コードを確かめる。共有を作る手順は family_share_page.mjs。
  * 実在のパスキーや個人情報は使わない。
  */
 import { bytesToB64url } from "../app/static/js/watashi/bytes.mjs";
@@ -131,43 +131,27 @@ function createDocument() {
   doc.body = body;
   const ids = [
     "status", "lock-state", "incoming", "connections", "shares", "received",
-    "chapters", "questions", "preview-output", "history-view", "received-view",
-    "invite-link", "connection", "expires-at", "confirm-share", "login-here",
-    "unlock-here", "invite-open", "copy-invite", "accept-open", "show-preview", "share",
-    "invite-qr", "invite-qr-output", "invite-output", "all-answers", "encrypted-answers", "answer-ciphertext",
+    "family-page", "history-view", "received-view", "share-start", "share-start-help",
+    "invite-link", "login-here",
+    "unlock-here", "invite-open", "copy-invite", "accept-open",
+    "invite-qr", "invite-qr-output", "invite-output", "encrypted-answers", "answer-ciphertext",
     "family-detail", "family-detail-title", "family-detail-body", "family-detail-status", "family-detail-unlock",
     "family-close-top", "family-close-bottom", "family-stop-top", "family-stop-bottom",
     "confirmation-output", "confirmation-code", "confirmation-link", "confirmation-qr", "confirmation-expiry",
     "copy-confirmation",
   ];
   for (const id of ids) {
-    const tag = id === "connection" ? "select" : id === "expires-at" || id === "confirm-share" ? "input" : "div";
-    const node = createNode(tag);
+    const node = createNode("div");
     node.id = id;
-    if (id === "confirm-share") {
-      node.type = "checkbox";
-    }
     body.append(node);
-  }
-  const questions = createNode("input");
-  questions.type = "radio";
-  questions.name = "scope";
-  questions.value = "questions";
-  questions.checked = true;
-  body.append(questions);
-  for (const scope of ["all", "chapters"]) {
-    const input = createNode("input");
-    input.type = "radio";
-    input.name = "scope";
-    input.value = scope;
-    body.append(input);
   }
   return doc;
 }
 
 const document = createDocument();
 globalThis.document = document;
-globalThis.location = { origin: "http://localhost:5000", pathname: "/family", hash: "" };
+const navigations = [];
+globalThis.location = { origin: "http://localhost:5000", pathname: "/family", hash: "", assign(path) { navigations.push(path); } };
 globalThis.history = { replaceState() {} };
 
 const userHandle = crypto.getRandomValues(new Uint8Array(32));
@@ -370,9 +354,12 @@ function buttonNamed(label) {
   return found[0] || null;
 }
 
-await waitFor(() => document.querySelector("#shares").children.length > 0 && document.querySelector("#questions").children.length > 0);
-check("preview is unavailable with no selected question", document.querySelector("#show-preview").disabled);
-check("sharing is unavailable before content confirmation", document.querySelector("#share").disabled);
+await waitFor(() => document.querySelector("#shares").children.length > 0 && document.querySelector("#connections").children.length > 0);
+check("family list shows the active family", textOf(document.querySelector("#connections")).includes("家族"));
+check("share start is available with an active family", document.querySelector("#share-start").disabled === false && document.querySelector("#share-start-help").hidden === true);
+await document.querySelector("#share-start").click();
+check("share start opens the separate share page", navigations.at(-1) === "/family/share");
+check("the list page no longer holds the share form", document.querySelector("#show-preview") === null && document.querySelector("#share") === null);
 check("owner card has a clear open action", document.querySelector("#shares").children[0].children[0].children[1].textContent === "開く");
 check("pending key is visually distinct from active sharing", document.querySelector("#shares").children[0].children[0].dataset.shareState === "key_pending");
 check("expired share is not shown as active", document.querySelector("#shares").children[1].children[0].dataset.shareState === "expired" && textOf(document.querySelector("#shares").children[1]).includes("期限切れ"));
@@ -387,46 +374,12 @@ await buttonNamed("期限を変更").click();
 check("expiry change reveals input", !expiryInput.parentNode.parentNode.hidden);
 await buttonNamed("期限を変更").click();
 check("expiry input can be dismissed", expiryInput.parentNode.parentNode.hidden);
-const question = document.querySelector("#questions").querySelectorAll("input:checked").length
-  ? null
-  : document.querySelector("#questions").children[0].children[0];
-question.checked = true;
-for (const callback of document.querySelector("#questions").listeners.change || []) callback();
-check("preview is available with a selected question and family", !document.querySelector("#show-preview").disabled);
-const recipient = document.querySelector("#connection");
-const recipientOptions = [...recipient.children];
-recipient.replaceChildren();
-for (const callback of recipient.listeners.change || []) callback();
-check("preview is unavailable without a family recipient", document.querySelector("#show-preview").disabled);
-recipient.replaceChildren(...recipientOptions);
-const shareExpiry = document.querySelector("#expires-at");
-shareExpiry.value = new Date(Date.now() - 3600000).toISOString();
-for (const callback of shareExpiry.listeners.input || []) callback();
-check("preview is unavailable with an expired date", document.querySelector("#show-preview").disabled);
-shareExpiry.value = "";
-for (const callback of shareExpiry.listeners.input || []) callback();
-check("preview becomes available after clearing expiry", !document.querySelector("#show-preview").disabled);
-await document.querySelector("#show-preview").click();
-check("sharing stays unavailable until confirmation is checked", document.querySelector("#share").disabled);
-check("preview shows the new key", textOf(document.querySelector("#preview-output")).includes("鍵：new-key"));
-activeKeyId = "other-key";
-document.querySelector("#confirm-share").checked = true;
-const before = calls.filter((item) => item.path.endsWith("/update")).length;
-await buttonNamed("この範囲で更新").click();
-check("a key change after preview does not send the old key", calls.filter((item) => item.path.endsWith("/update")).length === before);
-check("the page asks for confirmation again", document.querySelector("#status").textContent.includes("確認"));
-activeKeyId = "new-key";
-await document.querySelector("#show-preview").click();
-document.querySelector("#confirm-share").checked = true;
-await buttonNamed("この範囲で更新").click();
-const posted = calls.findLast((item) => item.path === "/api/v1/family/shares/share-1/update");
-check("the confirmed new key is sent", posted && posted.body.recipient_key_id === "new-key");
-check("the stored old key is not sent", posted && posted.body.recipient_key_id !== "old-key");
-check("active owner card is marked for green styling", document.querySelector("#shares").children[0].children[0].dataset.shareState === "active");
+await buttonNamed("内容を選び直して更新").click();
+check("update continues in the share page with the same share", navigations.at(-1) === "/family/share?update=share-1");
 await document.querySelector("#family-stop-top").click();
 check("stopping asks for confirmation", stopPrompts[0]?.includes("この共有を停止しますか"));
 check("cancel does not send a stop request", !calls.some(item => item.path.endsWith("/stop")));
-check("cancel leaves the share active", ownStatus === "active" && !document.querySelector("#family-stop-bottom").disabled);
+check("cancel leaves the share running", ownStatus !== "stopped" && !document.querySelector("#family-stop-bottom").disabled);
 confirmStop = true;
 await document.querySelector("#family-stop-bottom").click();
 check("confirmed stop sends one request", calls.filter(item => item.path.endsWith("/stop")).length === 1);
@@ -444,14 +397,6 @@ await document.querySelector("#received").children[0].children[0].click();
 check("received modal decrypts family answer", textOf(document.querySelector("#family-detail-body")).includes("家族から届いたダミー回答"));
 check("received modal has no sender-only stop action", document.querySelector("#family-stop-top").hidden && document.querySelector("#family-stop-bottom").hidden);
 await document.querySelector("#family-close-top").click();
-const scopes = document.querySelectorAll("input[name=scope]");
-for (const scope of ["all", "chapters", "questions"]) {
-  for (const input of scopes) input.checked = input.value === scope;
-  for (const callback of scopes[0].listeners.change || []) callback();
-  check(`scope ${scope} controls question visibility`, document.querySelector("#questions").hidden === (scope !== "questions"));
-  check(`scope ${scope} controls chapter visibility`, document.querySelector("#chapters").hidden === (scope !== "chapters"));
-  check(`scope ${scope} controls all-answer visibility`, document.querySelector("#all-answers").hidden === (scope !== "all"));
-}
 await document.querySelector("#invite-qr").click();
 const image = document.querySelector("#invite-qr-output").children[0];
 check("invite QR is generated locally", image && image.src.startsWith("data:image/gif;base64,"));

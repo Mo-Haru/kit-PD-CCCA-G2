@@ -303,3 +303,36 @@
   height: auto;
   image-rendering: pixelated;
 }
+
+/* 家族に共有する画面の、手順の表示。 */
+.sensitive .share-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sensitive .share-steps > li {
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 999px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 0.875rem;
+}
+
+.sensitive .share-steps > li[data-step-state="current"] {
+  border-color: var(--md-sys-color-primary);
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-surface);
+  font-weight: 700;
+}
+
+.sensitive .share-steps > li[data-step-state="done"]::before {
+  content: "✓ ";
+}
+
+.sensitive .share-nav {
+  margin-top: 1.25rem;
+}

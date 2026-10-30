@@ -66,7 +66,7 @@ def test_auth_page_is_standalone(client):
 
 
 def test_common_pages_have_session_header(client):
-    for path in ("/", "/answers", "/sharing", "/family", "/family/invite", "/transfer", "/view/layout-check"):
+    for path in ("/", "/answers", "/sharing", "/family", "/family/share", "/family/invite", "/transfer", "/view/layout-check"):
         response = client.get(path)
         body = response.get_data(as_text=True)
         assert response.status_code == 200
@@ -175,6 +175,13 @@ def test_family_has_dedicated_invitation_and_shared_answer_dialog(client):
     for button in ("family-stop-top", "family-stop-bottom"):
         assert "button-danger" in markup.one_id(button).attrs["class"].split()
     markup.one_id("invite-qr")
+    # 共有の作成は別の画面。一覧の画面には、開始のボタンだけを置く。
+    assert markup.one_id("share-start").tag == "button"
+    for form_id in ("show-preview", "share", "confirm-share", "expires-at", "connection"):
+        assert not any(element.attrs.get("id") == form_id for element in markup.elements)
+    markup.one_id("connections")
+    markup.one_id("shares")
+    markup.one_id("received")
     invite = StrictMarkup(client.get("/family/invite").get_data(as_text=True))
     invite.module_script("/static/js/watashi/family-invitation.mjs")
     assert "disabled" in invite.one_id("accept-invitation").attrs
@@ -232,3 +239,30 @@ def test_init_db_command_is_registered(app):
     result = app.test_cli_runner().invoke(args=["--help"])
     assert result.exit_code == 0
     assert "init-db" in result.output
+
+
+def test_family_share_page_is_a_stepwise_flow(client):
+    from tests.test_menu import StrictMarkup
+
+    response = client.get("/family/share")
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "no-store"
+    markup = StrictMarkup(response.get_data(as_text=True))
+    markup.module_script("/static/js/watashi/family-share.mjs")
+    order = ["step-unlock", "step-select", "step-target", "step-confirm", "step-done"]
+    positions = [markup.elements.index(markup.one_id(step)) for step in order]
+    assert positions == sorted(positions)
+    for step in order[1:]:
+        assert "hidden" in markup.one_id(step).attrs
+    assert "hidden" not in markup.one_id("step-unlock").attrs
+    for control in ("unlock-here", "step-next", "share", "confirm-share"):
+        assert "disabled" in markup.one_id(control).attrs
+    assert markup.one_id("back-to-family").attrs["href"] == "/family"
+
+
+def test_family_share_page_flow():
+    result = subprocess.run(
+        ["node", "tests/family_share_page.mjs"], cwd=Path(__file__).resolve().parents[1],
+        capture_output=True, text=True, timeout=20, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

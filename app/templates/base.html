@@ -1,10 +1,13 @@
 {% from "_navigation_icons.html" import icon %}
+{# 各画面は page_title を定義する。タブの題名と、左上のアプリ名の横のパンくずに使う。 #}
+{% set page_title %}{% block page_title %}{% endblock %}{% endset %}
+{% set page_title = page_title | trim %}
 <!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}意思の記録{% endblock %}</title>
+  <title>{% if page_title %}{{ page_title }} | {% endif %}意思の記録</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   {% block extra_head %}{% endblock %}
 </head>
@@ -15,7 +18,10 @@
       <button id="menu-toggle" class="menu-toggle" type="button" aria-controls="site-menu" aria-expanded="false" aria-label="メニューを開く" hidden>
         {{ icon("menu", "menu-icon") }}
       </button>
-      <a class="brand" href="{{ url_for('main.index') }}">意思の記録</a>
+      <ol class="breadcrumb" aria-label="現在のページ">
+        <li><a class="brand" href="{{ url_for('main.index') }}">意思の記録</a></li>
+        {% if page_title %}<li class="breadcrumb-current" aria-current="page">{{ page_title }}</li>{% endif %}
+      </ol>
       <div id="header-account" class="header-account" data-session-state="loading">
         <p class="header-session" role="status" aria-live="polite" aria-atomic="true">
           <span id="header-session-label">ログイン状態を確認中…</span>
@@ -45,16 +51,20 @@
           <a href="{{ url_for('main.index') }}" {% if request.endpoint == 'main.index' %}aria-current="page"{% endif %}>{{ icon("home") }}<span class="nav-label">ホーム</span></a>
           <a href="{{ url_for('answers.index') }}" {% if request.endpoint in ('answers.index', 'answers.demo') %}aria-current="page"{% endif %}>{{ icon("answers") }}<span class="nav-label">回答</span></a>
           <a href="{{ url_for('sharing.index') }}" {% if request.endpoint == 'sharing.index' %}aria-current="page"{% endif %}>{{ icon("sharing") }}<span class="nav-label">共有</span></a>
-          <a href="{{ url_for('protection_pages.family') }}" {% if request.endpoint in ('protection_pages.family', 'protection_pages.family_invite') %}aria-current="page"{% endif %}>{{ icon("family") }}<span class="nav-label">家族</span></a>
+          <a href="{{ url_for('protection_pages.family') }}" {% if request.endpoint in ('protection_pages.family', 'protection_pages.family_invite', 'protection_pages.family_share') %}aria-current="page"{% endif %}>{{ icon("family") }}<span class="nav-label">家族</span></a>
           <a href="{{ url_for('protection_pages.transfer') }}" {% if request.endpoint == 'protection_pages.transfer' %}aria-current="page"{% endif %}>{{ icon("transfer") }}<span class="nav-label">移行</span></a>
           <a href="{{ url_for('main.health') }}">{{ icon("health") }}<span class="nav-label">起動確認</span></a>
         </nav>
       </div>
     </aside>
     <div id="site-content" class="site-content" tabindex="0" role="region" aria-label="ページ本文">
+      {# お知らせがある画面だけ、上部に帯を出す。 #}
+      {% set development_notice %}{% block development_notice %}{% endblock %}{% endset %}
+      {% if development_notice | trim %}
       <div class="banner">
-        <p class="wrap">{% block development_notice %}開発用の土台です。回答の入力画面は未実装です。パスキー、家族共有、QRの作成と閲覧、端末移行は使えます。{% endblock %}</p>
+        <p class="wrap">{{ development_notice }}</p>
       </div>
+      {% endif %}
       <main id="main" class="wrap" tabindex="-1">
         {% block content %}{% endblock %}
       </main>
