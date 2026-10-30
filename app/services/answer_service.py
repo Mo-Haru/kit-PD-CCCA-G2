@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from sqlalchemy import func
+from flask import current_app
+from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 
 from app.crypto_contract import (
     ANSWER_ITEM_STATES,
@@ -12,17 +14,19 @@ from app.crypto_contract import (
     SCHEMA_VERSION,
 )
 from app.extensions import db
-from app.models import PrivateAnswerDocument, Question, QuestionCategory, UserDataKey, utcnow
+from app.models import PrivateAnswerDocument, Question, QuestionCategory, SharedSnapshot, UserDataKey, utcnow
 from app.services.support import (
     audit,
     b64decode,
     b64encode,
     ciphertext_limit,
     commit_or_conflict,
+    ensure_rate_bucket,
     expect_fields,
     fail,
     iso,
     load_login,
+    take_rate,
 )
 
 FIELDS = {"expected_revision", "data_key_id", "nonce", "ciphertext", "crypto_version", "schema_version"}
@@ -93,9 +97,28 @@ def current_answer() -> dict:
     return {"revision": row.revision, "document": _view(row)}
 
 
+def _prune_history(user_id: str, newest: int) -> None:
+    """最新から ANSWER_HISTORY_KEEP 版より古い版を削除する。共有の元として参照されている版は残す。
+
+    古い版を読むAPIはなく、画面と共有は最新版だけを使う。版を無制限に残すと、
+    1アカウントで最大256KiBの版を足し続けてDBを埋められるため。
+    """
+    keep = int(current_app.config["ANSWER_HISTORY_KEEP"])
+    referenced = select(SharedSnapshot.source_document_id).where(SharedSnapshot.owner_user_id == user_id)
+    db.session.execute(
+        delete(PrivateAnswerDocument).where(
+            PrivateAnswerDocument.user_id == user_id,
+            PrivateAnswerDocument.revision <= newest - keep,
+            PrivateAnswerDocument.id.not_in(referenced),
+        ).execution_options(synchronize_session=False)
+    )
+
+
 def save_answer(body: dict) -> dict:
     user, _session, _passkey = load_login()
     expect_fields(body, FIELDS)
+    rate_ident = f"user:{user.id}"
+    ensure_rate_bucket("answer_save", rate_ident)
     if body.get("crypto_version") != CRYPTO_VERSION or body.get("schema_version") != SCHEMA_VERSION:
         fail("unsupported_crypto", 400, "未対応の暗号方式です。", actor_id=user.id)
     expected = body.get("expected_revision")
@@ -111,6 +134,9 @@ def save_answer(body: dict) -> dict:
     if expected != current:
         fail("revision_conflict", 409, "別の更新が入ったため、保存できませんでした。",
              action="answer_save", target_type="answer", actor_id=user.id)
+    # 保存回数の加算・新しい版の追加・古い版の削除を同じトランザクションでコミットする。
+    # 版の番号は (user_id, revision) で一意なので、同時の保存は一方だけが成功し、もう一方は加算ごと取り消される。
+    take_rate("answer_save", rate_ident, message="回答の保存が多すぎます。時間をおいてやり直してください。")
     document = PrivateAnswerDocument(
         user_id=user.id,
         data_key_id=data_key.id,
@@ -122,6 +148,13 @@ def save_answer(body: dict) -> dict:
         created_at=utcnow(),
     )
     db.session.add(document)
+    try:
+        # 同時の保存と同じ版になったら、ここで一意制約に当たる。古い版を消す前に確かめる。
+        db.session.flush()
+    except IntegrityError:
+        db.session.rollback()
+        fail("revision_conflict", 409, "別の更新が入ったため、保存できませんでした。", actor_id=user.id)
+    _prune_history(user.id, current + 1)
     audit("answer_saved", "answer", str(current + 1), "success", actor_id=user.id)
     commit_or_conflict("別の更新が入ったため、保存できませんでした。", code="revision_conflict")
     return {"revision": document.revision, "document": _view(document)}
