@@ -554,10 +554,25 @@ def update_share(share_id: str, body: dict) -> dict:
     version = share.current_version + 1
     enc, ciphertext = _hpke_parts(body.get("version"))
     data_key, nonce, owner_ct = _owner_copy(body, user.id)
-    share.current_version = version
-    share.recipient_key_id = current_key.id
     # 新しい鍵向けの暗号文を同じ更新で保存したときだけ、配信可能な状態へ戻す。
-    share.status = "active"
+    # 状態を確かめてから書くと、その間に確定した停止を active で上書きしてしまう。
+    # 停止されていないこと・版が変わっていないことを条件にしたUPDATE1回で、停止と更新のどちらか一方だけを成立させる。
+    moved = db.session.execute(
+        update(FamilyShare).where(
+            FamilyShare.id == share.id,
+            FamilyShare.owner_user_id == user.id,
+            FamilyShare.status.in_(("active", "key_pending")),
+            FamilyShare.stopped_at.is_(None),
+            FamilyShare.current_version == expected,
+        ).values(current_version=version, recipient_key_id=current_key.id, status="active", updated_at=utcnow())
+        .execution_options(synchronize_session=False)
+    ).rowcount == 1
+    if not moved:
+        db.session.rollback()
+        db.session.refresh(share)
+        if share.status == "stopped" or share.stopped_at is not None:
+            fail("share_stopped", 409, "停止した共有は更新できません。", actor_id=user.id)
+        fail("revision_conflict", 409, "別の版があるため更新できません。", actor_id=user.id)
     db.session.add(FamilyShareVersion(
         share_id=share.id, version=version, hpke_enc=enc, ciphertext=ciphertext, crypto_suite=HPKE_SUITE,
     ))
@@ -572,6 +587,7 @@ def update_share(share_id: str, body: dict) -> dict:
         db.session.rollback()
         fail("revision_conflict", 409, "別の版があるため更新できません。")
         raise exc
+    db.session.refresh(share)
     return {"share": _owner_share_view(share)}
 
 
@@ -598,11 +614,15 @@ def stop_share(share_id: str) -> dict:
     share = db.session.get(FamilyShare, share_id)
     if share is None or share.owner_user_id != user.id:
         fail("not_found", 404, "共有が見つかりません。", actor_id=user.id)
-    if share.status != "stopped":
-        share.status = "stopped"
-        share.stopped_at = utcnow()
+    # 更新と同時でも、停止の時刻を上書きせずに一度だけ停止する。
+    stopped = db.session.execute(
+        update(FamilyShare).where(FamilyShare.id == share.id, FamilyShare.status != "stopped")
+        .values(status="stopped", stopped_at=utcnow()).execution_options(synchronize_session=False)
+    ).rowcount == 1
+    if stopped:
         audit("share_stopped", "family_share", share.id, "success", actor_id=user.id)
-        db.session.commit()
+    db.session.commit()
+    db.session.refresh(share)
     return {"ok": True, "status": share.status}
 
 
@@ -701,6 +721,8 @@ def _deliverable(share: FamilyShare, user_id: str) -> bool:
     return (
         share.recipient_user_id == user_id
         and share.status == "active"
+        # 停止の記録がある共有は、状態の値にかかわらず配信しない（防御的な確認）。
+        and share.stopped_at is None
         and not _expired(share)
         and _connection_active(share)
         and _current_recipient_key(share)
