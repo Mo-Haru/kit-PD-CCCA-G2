@@ -100,6 +100,8 @@ HKDFのsaltは、パスキーの包みでは封筒の `kdf_salt`、それ以外�
 
 `PUT /api/v1/answers/current` の本体は `expected_revision`、`data_key_id`、`nonce`、`ciphertext`、`crypto_version`、`schema_version` だけです。`expected_revision` が現在の版と違うとき、または同時INSERTで版が衝突したときは409 `revision_conflict` です。最新版は上書きしません。`expected_revision` が無いときは400 `invalid_revision` です。平文の項目名を足すと400になり、その値は応答と監査ログへ書きません。
 
+保存は1アカウント1時間60回まで（`RATE_LIMITS["answer_save"]`、超えると429 `rate_limited`）です。競合で失敗した保存は数えません。残す版は最新の20版まで（`ANSWER_HISTORY_KEEP`、1版最大256KiBなので合計は最大約5MiB）で、それより古い版は保存と同じトランザクションで削除します。古い版を読むAPIはなく、画面と共有は最新版だけを使います。`SharedSnapshot` の元として参照されている版は削除しません。
+
 今牧の画面は、読み込んだ `revision` を編集中に保持し、保存時へそのまま渡します。保存直前に最新版を取り直して古い内容へ付け替えないでください。409のときは入力を捨てず、再読込と比較を案内します。
 
 ```javascript
