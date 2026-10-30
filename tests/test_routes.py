@@ -170,10 +170,22 @@ def test_family_has_dedicated_invitation_and_shared_answer_dialog(client):
 
     markup = StrictMarkup(client.get("/family").get_data(as_text=True))
     assert not any(element.attrs.get("id") == "login-here" for element in markup.elements)
-    assert markup.one_id("unlock-here").attrs["data-unlock-state"] == "locked"
+    # 家族の画面に「回答の暗号化を解除」のボタンはない。回答を開くときに、その場で本人確認をする。
+    for removed in ("unlock-here", "invite-unlock"):
+        assert not any(element.attrs.get("id") == removed for element in markup.elements)
+    assert "hidden" in markup.one_id("family-detail-unlock").attrs
+    assert "パスキーで本人確認して表示" in client.get("/family").get_data(as_text=True)
     assert markup.one_id("family-detail").tag == "dialog"
-    for button in ("family-stop-top", "family-stop-bottom"):
-        assert "button-danger" in markup.one_id(button).attrs["class"].split()
+    # 配信停止と閉じるは、右上に並べる。下部のボタンはない。
+    assert "button-danger" in markup.one_id("family-stop").attrs["class"].split()
+    actions = markup.one_id("family-stop").ancestors[-1]
+    assert actions is markup.one_id("family-close").ancestors[-1]
+    assert markup.one_id("family-detail-title").ancestors[-1] is actions.ancestors[-1], "title and buttons share the header row"
+    for removed in ("family-stop-bottom", "family-close-bottom", "family-stop-top", "family-close-top"):
+        assert not any(element.attrs.get("id") == removed for element in markup.elements)
+    detail = markup.one_id("family-detail")
+    assert not any(detail in element.ancestors and "share-dialog-footer" in (element.attrs.get("class") or "").split()
+                   for element in markup.elements)
     markup.one_id("invite-qr")
     # 共有の作成は別の画面。一覧の画面には、開始のボタンだけを置く。
     assert markup.one_id("share-start").tag == "button"

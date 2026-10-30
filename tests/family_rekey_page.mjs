@@ -131,12 +131,12 @@ function createDocument() {
   doc.body = body;
   const ids = [
     "status", "lock-state", "incoming", "connections", "shares", "received",
-    "family-page", "family-edit", "invite-start", "invite-dialog", "invite-dialog-status", "invite-close-top", "invite-close-bottom", "invite-unlock", "stat-family", "stat-sharing", "stat-received", "stat-attention", "stat-attention-tile", "stat-attention-mark", "stat-attention-note", "history-view", "received-view", "share-start", "share-start-help",
+    "family-page", "family-edit", "invite-start", "invite-dialog", "invite-dialog-status", "invite-close-top", "invite-close-bottom", "stat-family", "stat-sharing", "stat-received", "stat-attention", "stat-attention-tile", "stat-attention-mark", "stat-attention-note", "history-view", "received-view", "share-start", "share-start-help",
     "invite-link", "login-here",
-    "unlock-here", "invite-open", "copy-invite", "accept-open",
+    "invite-open", "copy-invite", "accept-open",
     "invite-qr", "invite-qr-output", "invite-output", "encrypted-answers", "answer-ciphertext",
     "family-detail", "family-detail-title", "family-detail-body", "family-detail-status", "family-detail-unlock",
-    "family-close-top", "family-close-bottom", "family-stop-top", "family-stop-bottom",
+    "family-close", "family-stop",
     "confirmation-output", "confirmation-code", "confirmation-link", "confirmation-qr", "confirmation-expiry",
     "copy-confirmation",
   ];
@@ -311,23 +311,28 @@ Object.defineProperty(globalThis, "navigator", {
     },
   },
 });
-globalThis.navigator.credentials.get = async () => ({
-  id: credentialId,
-  rawId: new Uint8Array(credentialId.length),
-  type: "public-key",
-  response: {
-    clientDataJSON: new Uint8Array([1]),
-    authenticatorData: new Uint8Array([2]),
-    signature: new Uint8Array([3]),
-    userHandle,
-  },
-  getClientExtensionResults() {
-    return { prf: { results: { first: prf } } };
-  },
-});
+let denyPrompt = true;
+let prompts = 0;
+globalThis.navigator.credentials.get = async () => {
+  prompts += 1;
+  if (denyPrompt) throw Object.assign(new Error("denied"), { name: "NotAllowedError" });
+  return {
+    id: credentialId,
+    rawId: new Uint8Array(credentialId.length),
+    type: "public-key",
+    response: {
+      clientDataJSON: new Uint8Array([1]),
+      authenticatorData: new Uint8Array([2]),
+      signature: new Uint8Array([3]),
+      userHandle,
+    },
+    getClientExtensionResults() {
+      return { prf: { results: { first: prf } } };
+    },
+  };
+};
 
-const { unlock } = await import("../app/static/js/watashi/client.mjs");
-await unlock();
+// 画面を開いた時点では、回答は暗号化されたまま（解除のボタンはない）。
 await import("../app/static/js/watashi/family.mjs");
 
 async function waitFor(predicate) {
@@ -387,7 +392,16 @@ check("the list page no longer holds the share form", document.querySelector("#s
 check("owner card has a clear open action", document.querySelector("#shares").children[0].children[0].children[1].textContent === "開く");
 check("pending key is visually distinct from active sharing", document.querySelector("#shares").children[0].children[0].dataset.shareState === "key_pending");
 check("expired share is not shown as active", document.querySelector("#shares").children[1].children[0].dataset.shareState === "expired" && textOf(document.querySelector("#shares").children[1]).includes("期限切れ"));
+check("nothing was unlocked just by opening the page", prompts === 0);
+// 暗号化された回答を開くと、その場でパスキーの確認を求める。取り消したら表示せず、続ける手段を出す。
 await document.querySelector("#shares").children[0].children[0].click();
+check("opening a share asks for the passkey", prompts === 1);
+check("a cancelled prompt shows nothing and says so", textOf(document.querySelector("#family-detail-body")).includes("発行時のダミー回答") === false
+  && document.querySelector("#family-detail-status").textContent.includes("本人確認を完了できませんでした"));
+check("a retry button is offered", document.querySelector("#family-detail-unlock").hidden === false);
+denyPrompt = false;
+await document.querySelector("#family-detail-unlock").click();
+check("retrying with the passkey opens the answers", prompts === 2);
 check("owner share opens in modal", document.querySelector("#family-detail").open);
 check("owner modal shows the issued snapshot", textOf(document.querySelector("#family-detail-body")).includes("発行時のダミー回答"));
 check("owner modal does not substitute the latest answer", !textOf(document.querySelector("#family-detail-body")).includes("本人の保存済みダミー回答"));
@@ -400,18 +414,18 @@ await buttonNamed("期限を変更").click();
 check("expiry input can be dismissed", expiryInput.parentNode.parentNode.hidden);
 await buttonNamed("内容を選び直して更新").click();
 check("update continues in the share page with the same share", navigations.at(-1) === "/family/share?update=share-1");
-await document.querySelector("#family-stop-top").click();
+await document.querySelector("#family-stop").click();
 check("stopping asks for confirmation", stopPrompts[0]?.includes("この共有を停止しますか"));
 check("cancel does not send a stop request", !calls.some(item => item.path.endsWith("/stop")));
-check("cancel leaves the share running", ownStatus !== "stopped" && !document.querySelector("#family-stop-bottom").disabled);
+check("cancel leaves the share running", ownStatus !== "stopped" && !document.querySelector("#family-stop").disabled);
 confirmStop = true;
-await document.querySelector("#family-stop-bottom").click();
+await document.querySelector("#family-stop").click();
 check("confirmed stop sends one request", calls.filter(item => item.path.endsWith("/stop")).length === 1);
 check("stopped card is marked for muted styling", document.querySelector("#shares").children[0].children[0].dataset.shareState === "stopped");
-check("both stop buttons are disabled after stopping", document.querySelector("#family-stop-top").disabled && document.querySelector("#family-stop-bottom").disabled);
-await document.querySelector("#family-stop-top").click();
+check("the stop button is disabled after stopping", document.querySelector("#family-stop").disabled);
+await document.querySelector("#family-stop").click();
 check("already stopped share cannot send another stop request", calls.filter(item => item.path.endsWith("/stop")).length === 1);
-await document.querySelector("#family-close-bottom").click();
+await document.querySelector("#family-close").click();
 check("close button closes the dialog", !document.querySelector("#family-detail").open);
 check("closed modal clears answers", document.querySelector("#family-detail-body").children.length === 0);
 check("received card identifies family", textOf(document.querySelector("#received")).includes("家族テスト さんからの共有"));
@@ -419,8 +433,8 @@ check("received card has the same open action", document.querySelector("#receive
 check("active received card is marked for green styling", document.querySelector("#received").children[0].children[0].dataset.shareState === "active");
 await document.querySelector("#received").children[0].children[0].click();
 check("received modal decrypts family answer", textOf(document.querySelector("#family-detail-body")).includes("家族から届いたダミー回答"));
-check("received modal has no sender-only stop action", document.querySelector("#family-stop-top").hidden && document.querySelector("#family-stop-bottom").hidden);
-await document.querySelector("#family-close-top").click();
+check("received modal has no sender-only stop action", document.querySelector("#family-stop").hidden);
+await document.querySelector("#family-close").click();
 await document.querySelector("#invite-start").click();
 check("the invite button opens the invite dialog", document.querySelector("#invite-dialog").open);
 await document.querySelector("#invite-qr").click();

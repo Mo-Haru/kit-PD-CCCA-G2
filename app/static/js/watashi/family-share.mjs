@@ -268,6 +268,7 @@ export function bindFamilyShare(root, client = {
       `範囲：${scopeLabel[chosen.scope]}`,
     ].map(text => {
       const row = root.createElement("p");
+      row.className = "answer-fact";
       row.textContent = text;
       return row;
     });

@@ -1183,7 +1183,7 @@ def test_added_passkey_proof_requires_reauth_and_old_passkey_remains(client, app
     assert again.status_code == 200
     family = client.get("/family")
     transfer = client.get("/transfer")
-    assert b'id="unlock-here"' in family.data
+    assert b'id="unlock-here"' not in family.data
     assert b'id="share-start"' in family.data
     assert b'id="share"' in client.get("/family/share").data
     assert b'id="target-confirm"' in transfer.data

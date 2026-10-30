@@ -157,7 +157,10 @@ assert.equal(nodes["preview-help"].hidden, true);
 await nodes["show-preview"].fire("click");
 const previewAnswers = nodes["preview-output"].children[1].children;
 assert.equal(previewAnswers.length, 1);
-assert.ok(previewAnswers[0].textContent.includes("<img src=x onerror=alert(1)>"));
+assert.ok(text(previewAnswers[0]).includes("<img src=x onerror=alert(1)>"));
+// 質問ごとに、1つの枠（質問の文と回答）で表示する。
+assert.ok(text(previewAnswers[0]).includes("質問1"));
+assert.ok(previewAnswers[0].className.includes("answer-item"));
 // Expiry/mode changes invalidate confirmation, including when changed programmatically.
 nodes["confirm-share"].checked = true;
 nodes["share-fields"].fire("change", { target: nodes["confirm-share"] });

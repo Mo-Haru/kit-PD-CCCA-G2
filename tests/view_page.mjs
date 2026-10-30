@@ -104,7 +104,8 @@ for (const resume of [false, true]) {
   await flush();
   if (!resume) await test.nodes.open.fire("click");
   await flush();
-  assert.ok(test.nodes.output.children[0].textContent.includes("共有した回答"));
+  const textOf = (node) => [node.textContent, ...node.children.map(textOf)].join("\n");
+  assert.ok(textOf(test.nodes.output.children[0]).includes("共有した回答"));
   assert.ok(test.nodes.status.textContent.includes("閲覧中"));
   const ending = test.nodes.end.fire("click");
   assert.equal(test.nodes.output.children.length, 0);

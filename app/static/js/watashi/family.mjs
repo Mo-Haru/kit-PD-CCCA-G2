@@ -35,14 +35,9 @@ function show(text) {
 
 function syncFamilyControls() {
   const ready = authenticated && answersReady && getUnlockState().unlocked;
-  const control = node("unlock-here");
-  control.textContent = ready ? "解除済み" : unlocking ? "解除中…" : "回答の暗号化を解除";
-  control.dataset.unlockState = ready ? "unlocked" : "locked";
-  control.disabled = !authenticated || unlocking || ready;
-  for (const id of ["invite-open", "invite-qr"]) node(id).disabled = !ready || unlocking;
+  // 暗号化された回答を開くとき・招待を作るときに、その場でパスキーの本人確認をする。
+  for (const id of ["invite-open", "invite-qr"]) node(id).disabled = !authenticated || unlocking;
   node("invite-start").disabled = !authenticated;
-  node("invite-unlock").hidden = !authenticated || ready;
-  node("invite-unlock").disabled = unlocking;
   node("family-edit").disabled = !authenticated || !hasActiveFamily;
   if (!hasActiveFamily) setEditing(false);
   // 共有の開始は、共有できる家族がいるときだけ。ロック解除は開始後の画面で行う。
@@ -123,7 +118,7 @@ async function syncAccess() {
   }
   if (session.user_id) knownUser = session.user_id;
   if (!session.authenticated) {
-    node("lock-state").textContent = "ヘッダーからログインしてください。ログイン後に回答の暗号化を解除できます。";
+    node("lock-state").textContent = "ヘッダーからログインしてください。";
     syncFamilyControls();
     return session;
   }
@@ -132,9 +127,7 @@ async function syncAccess() {
     decryptedAnswers = loaded.document;
     answersReady = true;
   }
-  node("lock-state").textContent = answersReady
-    ? `${session.display_name} さん：解除済み。共有された回答や招待を操作できます。`
-    : `${session.display_name} さん：回答は暗号化されています。共有された回答の表示と招待には解除が必要です。`;
+  node("lock-state").textContent = `${session.display_name} さん：暗号化された回答を開くときと、招待を作るときに、パスキーで本人確認をします。`;
   syncFamilyControls();
   return session;
 }
@@ -144,17 +137,15 @@ function closeFamilyDetail() {
   activeDetail = null;
   node("family-detail-body").replaceChildren();
   if (node("family-detail").open) node("family-detail").close();
-  if (detailTrigger?.isConnected === false) node("unlock-here").focus();
+  if (detailTrigger?.isConnected === false) node("share-start").focus();
   else detailTrigger?.focus();
   detailTrigger = null;
 }
 
 function syncDetailStops() {
-  for (const id of ["family-stop-top", "family-stop-bottom"]) {
-    node(id).hidden = activeDetail?.kind !== "own";
-    node(id).disabled = !activeDetail?.share || activeDetail.share.status === "stopped";
-    node(id).textContent = activeDetail?.share?.status === "stopped" ? "配信停止済み" : "配信停止";
-  }
+  node("family-stop").hidden = activeDetail?.kind !== "own";
+  node("family-stop").disabled = !activeDetail?.share || activeDetail.share.status === "stopped";
+  node("family-stop").textContent = activeDetail?.share?.status === "stopped" ? "配信停止済み" : "配信停止";
 }
 
 async function openFamilyDetail(id, kind, opener) {
@@ -182,10 +173,21 @@ async function openFamilyDetail(id, kind, opener) {
       own.body.append(facts, own.answers);
     }
     node("family-detail-body").append(own.body);
-    const ready = answersReady && getUnlockState().unlocked;
+    let ready = answersReady && getUnlockState().unlocked;
+    if (!ready) {
+      // 暗号化された回答を開くので、ここでパスキーの本人確認を求める。
+      node("family-detail-status").textContent = "暗号化された回答を開くため、パスキーで本人確認をします…";
+      try { await unlockFamily(); }
+      catch (error) {
+        if (ticket === detailSequence) { showError(error); node("family-detail-unlock").hidden = false; }
+        return;
+      }
+      if (ticket !== detailSequence || !node("family-detail").open) return;
+      ready = answersReady && getUnlockState().unlocked;
+    }
     node("family-detail-unlock").hidden = ready;
     if (!ready) {
-      node("family-detail-status").textContent = "回答は暗号化されています。解除すると共有内容を表示できます。";
+      node("family-detail-status").textContent = "回答は暗号化されています。本人確認をすると、共有内容を表示できます。";
       return;
     }
     if (kind !== "own" && !share.current) throw new Error("家族の鍵が変わったため、再共有されるまで内容を表示できません。");
@@ -206,7 +208,7 @@ async function stopFamilyDetail() {
   if (!activeDetail?.share || activeDetail.kind !== "own" || activeDetail.share.status === "stopped") return;
   if (!globalThis.confirm("この共有を停止しますか？\n停止すると、この家族への回答の配信が止まります。相手が保存済みの回答は削除されません。")) return;
   const current = activeDetail;
-  for (const id of ["family-stop-top", "family-stop-bottom"]) node(id).disabled = true;
+  node("family-stop").disabled = true;
   try {
     await api(`/api/v1/family/shares/${current.id}/stop`, { method: "POST", body: {} });
     current.share.status = "stopped";
@@ -233,7 +235,9 @@ function showError(error) {
       node("family-detail-unlock").hidden = false;
     }
   }
-  show(error.code === "reauth_required" ? "本人確認の期限が切れました。回答の暗号化をもう一度解除してください。" : error.message || "操作できませんでした。");
+  const cancelled = ["NotAllowedError", "AbortError"].includes(error.name);
+  show(error.code === "reauth_required" ? "本人確認の期限が切れました。もう一度、パスキーで本人確認をしてください。"
+    : cancelled ? "本人確認を完了できませんでした。もう一度お試しください。" : error.message || "操作できませんでした。");
 }
 
 async function unlockFamily() {
@@ -247,12 +251,13 @@ async function unlockFamily() {
     answersReady = true;
     needsReauth = false;
     await refresh();
-    show("回答の暗号化を解除しました。");
+    show("本人確認ができました。");
   } finally { unlocking = false; syncFamilyControls(); }
 }
 
 async function createInvitation(withQr) {
-  if (!answersReady || !getUnlockState().unlocked) throw new Error("先に回答の暗号化を解除してください。");
+  // 招待を作る前に、パスキーの本人確認をする。
+  if (!answersReady || !getUnlockState().unlocked) await unlockFamily();
   const created = await api("/api/v1/family/invitations", { method: "POST", body: { kind: "open" } });
   const link = new URL(created.invite_path, location.origin);
   link.hash = `token=${created.token}`;
@@ -480,27 +485,25 @@ async function refresh() {
 }
 
 if (document.querySelector("#family-page")) {
-  node("unlock-here").addEventListener("click", () => unlockFamily().catch(showError));
   node("share-start").addEventListener("click", () => globalThis.location.assign("/family/share"));
   node("family-edit").addEventListener("click", () => setEditing(!editing));
   node("invite-start").addEventListener("click", () => node("invite-dialog").showModal());
   for (const id of ["invite-close-top", "invite-close-bottom"]) node(id).addEventListener("click", closeInvite);
   node("invite-dialog").addEventListener("cancel", event => { event.preventDefault(); closeInvite(); });
-  node("invite-unlock").addEventListener("click", () => unlockFamily().catch(showError));
   node("invite-open").addEventListener("click", () => createInvitation(false).catch(showError));
   node("invite-qr").addEventListener("click", () => createInvitation(true).catch(showError));
-  for (const id of ["family-close-top", "family-close-bottom"]) node(id).addEventListener("click", closeFamilyDetail);
+  node("family-close").addEventListener("click", closeFamilyDetail);
   node("family-detail").addEventListener("cancel", event => { event.preventDefault(); closeFamilyDetail(); });
   node("family-detail").addEventListener("close", () => {
     detailSequence += 1;
     node("family-detail-body").replaceChildren();
   });
-  for (const id of ["family-stop-top", "family-stop-bottom"]) node(id).addEventListener("click", stopFamilyDetail);
+  node("family-stop").addEventListener("click", stopFamilyDetail);
   node("family-detail-unlock").addEventListener("click", async () => {
     try {
       await unlockFamily();
       if (activeDetail) await openFamilyDetail(activeDetail.id, activeDetail.kind);
-    } catch (error) { showError(error); node("family-detail-status").textContent = error.message; }
+    } catch (error) { showError(error); }
   });
   node("copy-confirmation").addEventListener("click", async () => {
     if (!confirmationLink) return;
