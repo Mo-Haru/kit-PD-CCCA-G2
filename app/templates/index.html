@@ -20,7 +20,7 @@
       </li>
       <li>
         <h3><a href="{{ url_for('sharing.index') }}">共有</a></h3>
-        <p>共有の有効・無効、期限、QRコード。<span class="badge">未実装</span></p>
+        <p>共有リンクとQRコードの作成、期限、停止。</p>
       </li>
       <li>
         <h3><a href="{{ url_for('auth.index', next=request.full_path if request.query_string else request.path) }}" data-auth-link>認証</a></h3>

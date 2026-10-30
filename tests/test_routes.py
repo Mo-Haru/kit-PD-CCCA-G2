@@ -136,8 +136,17 @@ def test_sharing_uses_real_client_and_requires_explicit_confirmation(client):
         assert "disabled" in markup.one_id(element_id).attrs
     assert "hidden" in markup.one_id("qr-output").attrs
     assert "readonly" in markup.one_id("share-url").attrs
+    markup.one_id("qr-image")
     assert response.headers["Cache-Control"] == "no-store"
     assert client.get("/static/js/watashi/sharing.mjs").status_code == 200
+
+
+def test_share_link_qr_image_is_drawn_locally():
+    result = subprocess.run(
+        ["node", "tests/qr_share_view.mjs"], cwd=Path(__file__).resolve().parents[1],
+        capture_output=True, text=True, timeout=20, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_sharing_preview_confirmation_failure_and_stop():

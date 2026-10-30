@@ -1,6 +1,7 @@
 import { api, createQrShare, getUnlockState, loadAnswerDocument, openOwnedQrShare, unlock } from "./client.mjs";
 import { entriesFromPayload, fillAnswerList, plaintextForSelection, presentAnswer } from "./crypto.mjs";
 import { bindQrShareDialog } from "./qr-share-dialog.mjs";
+import { renderQrCanvas } from "./qrShareView.mjs";
 
 const modeLabel = mode => ({ emergency: "緊急用（最初の閲覧のみ）", timed: "期限付き", long: "長期（最長3年）" }[mode] || mode);
 // サーバーの上限（QR_TIMED_MAX_SECONDS / QR_LONG_MAX_SECONDS）と同じ日数。
@@ -17,7 +18,9 @@ export function qrConfirmationKey(selection, mode, expiresAt, ownerId) {
   return JSON.stringify({ selection, mode, expiresAt, ownerId });
 }
 
-export function bindSharingPage(root, client = { api, createQrShare, getUnlockState, loadAnswerDocument, openOwnedQrShare, unlock }) {
+export function bindSharingPage(root, client = {
+  api, createQrShare, getUnlockState, loadAnswerDocument, openOwnedQrShare, unlock, renderQr: renderQrCanvas,
+}) {
   if (!root.querySelector("#sharing-page")) return;
   const node = id => root.querySelector(`#${id}`);
   let catalog = { questions: [], categories: [] };
@@ -176,6 +179,7 @@ export function bindSharingPage(root, client = { api, createQrShare, getUnlockSt
       detail?.clear();
       clearPreview();
       node("qr-output").hidden = true;
+      node("qr-image").replaceChildren();
       node("share-url").value = "";
       node("open-link").removeAttribute("href");
       node("qr-shares").replaceChildren();
@@ -294,12 +298,14 @@ export function bindSharingPage(root, client = { api, createQrShare, getUnlockSt
       throw new Error("共有する内容をもう一度確認してください。");
     }
     const created = await client.createQrShare({ ...chosen, payload: structuredClone(preview.payload) });
+    // QRにするのは created.url だけ。画像は端末の中だけで描く。
+    node("qr-image").replaceChildren(client.renderQr(created.url, { doc: root }));
     node("share-url").value = created.url;
     node("open-link").href = created.url;
     node("link-facts").textContent = `作成日時 ${created.share.created_at} / ${modeLabel(created.share.mode)}`;
     node("qr-output").hidden = false;
     clearPreview();
-    show("共有リンクを作成しました。開くだけでは閲覧を開始せず、「内容を開く」で開始します。");
+    show("共有リンクとQRコードを作成しました。開くだけでは閲覧を開始せず、「内容を開く」で開始します。");
     try { await refreshShares(); }
     catch (_error) { show("共有リンクは作成済みです。一覧を更新できませんでした。表示中のリンクをコピーしてください。", true); }
   }));
