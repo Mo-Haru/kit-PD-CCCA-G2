@@ -18,15 +18,17 @@
 // - `GET /api/v1/qr-shares` では url を復元できない。画面を離れたら
 //   再度このフローをやり直す必要がある(ただし updateQrShare による
 //   内容更新では url は変わらないため、QR画像の再発行は不要)。
+// - 共有画面(/sharing)は、内容の確認後に作った共有の url を renderQrCanvas() で画像にする。
 
-import { createQrShare, unlock } from "/static/js/watashi/client.mjs";
+import { createQrShare, unlock } from "./client.mjs";
 
-// QRエンコードはローカル同梱のライブラリを想定(例: npm の `qrcode` を
-// バンドルして /static/js/vendor/ 以下に配置するなど)。
-// 実際の配置パスはプロジェクトに合わせて書き換えること。
-import QRCode from "/static/js/vendor/qrcode.min.mjs";
+// QRエンコードはローカル同梱の qrcode-generator 2.0.4(家族招待のQRと同じもの)で行う。
+// ネットワーク通信はしない。
+import qrcode from "../../vendor/qrcode-generator-2.0.4.mjs";
 
-const MAX_TIMED_DAYS = 31;
+const MAX_DAYS = { timed: 31, long: 1096 };
+// QRの周囲に空ける余白(モジュール数)。仕様上は4以上が読み取りやすい。
+const QUIET_ZONE = 4;
 const ISO_UTC_Z_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
 
 export const QR_SHARE_MESSAGES = Object.freeze({
@@ -71,20 +73,56 @@ function assertValidModeAndExpiry(mode, expiresAt) {
     }
     return;
   }
-  if (mode === "timed") {
+  if (mode in MAX_DAYS) {
     if (typeof expiresAt !== "string" || !ISO_UTC_Z_RE.test(expiresAt)) {
       throw new Error(
-        'mode="timed" のとき expiresAt は UTCの "Z" 付きISO日時文字列が必要です(例: 2026-11-01T00:00:00Z)'
+        `mode="${mode}" のとき expiresAt は UTCの "Z" 付きISO日時文字列が必要です(例: 2026-11-01T00:00:00Z)`
       );
     }
     const limit = new Date();
-    limit.setUTCDate(limit.getUTCDate() + MAX_TIMED_DAYS);
+    limit.setUTCDate(limit.getUTCDate() + MAX_DAYS[mode]);
     if (new Date(expiresAt).getTime() > limit.getTime()) {
-      throw new Error(`expiresAt は最長 ${MAX_TIMED_DAYS} 日先までです`);
+      throw new Error(`expiresAt は最長 ${MAX_DAYS[mode]} 日先までです`);
     }
     return;
   }
   throw new Error(`不正な mode です: ${mode}`);
+}
+
+/**
+ * url をQR画像(canvas)にする。ネットワーク通信はせず、端末の中だけで描く。
+ *
+ * @param {string} url createQrShare() が返す url。秘密は # 以降に入っている
+ * @param {Object} [opts]
+ * @param {number} [opts.size=256] 画像の一辺の目安(px)。モジュールの大きさは整数にそろえる
+ * @param {Document} [opts.doc=document]
+ * @returns {HTMLCanvasElement}
+ */
+export function renderQrCanvas(url, { size = 256, doc = globalThis.document } = {}) {
+  if (typeof url !== "string" || !url) throw new Error("QRにするURLがありません");
+  const code = qrcode(0, "M");
+  code.addData(url);
+  code.make();
+  const count = code.getModuleCount();
+  const span = count + QUIET_ZONE * 2;
+  const cell = Math.max(2, Math.floor(size / span));
+  const canvas = doc.createElement("canvas");
+  canvas.width = span * cell;
+  canvas.height = span * cell;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "#000000";
+  for (let row = 0; row < count; row += 1) {
+    for (let column = 0; column < count; column += 1) {
+      if (code.isDark(row, column)) {
+        context.fillRect((column + QUIET_ZONE) * cell, (row + QUIET_ZONE) * cell, cell, cell);
+      }
+    }
+  }
+  canvas.setAttribute("role", "img");
+  canvas.setAttribute("aria-label", "共有リンクのQRコード");
+  return canvas;
 }
 
 /**
@@ -95,9 +133,10 @@ function assertValidModeAndExpiry(mode, expiresAt) {
  *   - この画面内で呼び切ること(鍵はページ遷移で消える)
  *
  * @param {Object} opts
- * @param {"emergency"|"timed"} opts.mode
- * @param {string|null} opts.expiresAt  emergencyはnull、timedはUTC "Z" 付きISO文字列
+ * @param {"emergency"|"timed"|"long"} opts.mode
+ * @param {string|null} opts.expiresAt  emergencyはnull、timed・longはUTC "Z" 付きISO文字列
  * @param {{scope: "all"|"chapters"|"questions", ids?: string[]}} opts.selection
+ * @param {Object|null} [opts.payload=null] 利用者が確認した内容。渡すとそのまま暗号化する
  * @param {number} [opts.size=256] QR画像の一辺(px)
  * @param {(message: string) => void} [opts.onStatus] 状態メッセージの通知先
  * @returns {Promise<{canvas: HTMLCanvasElement, shareId: string}>}
@@ -105,7 +144,7 @@ function assertValidModeAndExpiry(mode, expiresAt) {
  *   (秘密鍵・トークンを含まないため保持してよい)
  */
 export async function generateQrShareImage(opts) {
-  const { mode, expiresAt = null, selection, size = 256, onStatus } = opts ?? {};
+  const { mode, expiresAt = null, selection, payload = null, size = 256, onStatus } = opts ?? {};
 
   assertValidModeAndExpiry(mode, expiresAt);
   assertValidSelection(selection);
@@ -116,19 +155,14 @@ export async function generateQrShareImage(opts) {
     // この画面内で認証〜QR作成まで完結させる
     await unlock();
 
-    const created = await createQrShare({ mode, expiresAt, selection });
+    const created = await createQrShare({ mode, expiresAt, selection, payload });
 
     // QR化するのは created.url だけ。created.privateKey / created.startToken は
     // 変数に取り出さず、created オブジェクトごとここで用済みにする。
-    const canvas = document.createElement("canvas");
-    await QRCode.toCanvas(canvas, created.url, {
-      width: size,
-      margin: 2,
-      errorCorrectionLevel: "M",
-    });
+    const canvas = renderQrCanvas(created.url, { size });
 
     onStatus?.(QR_SHARE_MESSAGES.ready);
-    return { canvas, shareId: created.id };
+    return { canvas, shareId: created.share.id };
   } catch (error) {
     onStatus?.(QR_SHARE_MESSAGES.failed);
     throw error;

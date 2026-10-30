@@ -35,7 +35,8 @@ const ids = ["sharing-page", "share-fields", "status", "unlock-here", "refresh-s
   "qr-output", "share-url", "open-link", "login-here", "lock-state", "show-preview", "link-facts", "copy-link",
   "sharing-unlock-help", "encrypted-answers", "answer-ciphertext", "all-answers", "share-detail",
   "share-stop-top", "share-stop-bottom", "share-close-top", "share-close-bottom", "share-detail-status",
-  "share-detail-facts", "share-detail-unlock", "share-detail-cipher", "share-detail-answers", "long-warning"];
+  "share-detail-facts", "share-detail-unlock", "share-detail-cipher", "share-detail-answers", "long-warning",
+  "qr-image"];
 const nodes = Object.fromEntries(ids.map(id => [id, new Element()]));
 const scope = { value: "questions" }, mode = { value: "emergency" };
 const root = {
@@ -61,6 +62,7 @@ let unlockFailure = false;
 let decryptFailure = false;
 let reauthFailure = false;
 const issued = [];
+const rendered = [];
 let suspendLoad = null;
 let finishLoad;
 const client = {
@@ -97,6 +99,13 @@ const client = {
       created_at: "2026-10-26", current_version: 1, version: { ciphertext: "Shared-fixture-ciphertext" } };
     issued.push(share);
     return { url: "http://localhost/view/test#fixture-only", share };
+  },
+  renderQr(url, options) {
+    rendered.push({ url, doc: options.doc });
+    const image = new Element();
+    image.tagName = "CANVAS";
+    image.qrUrl = url;
+    return image;
   },
   async openOwnedQrShare(share) {
     if (share.id === "legacy") throw Object.assign(new Error("旧形式のため控えがありません"), { code: "owner_copy_unavailable" });
@@ -169,6 +178,9 @@ failCreate = true;
 await nodes["create-qr"].fire("click");
 assert.equal(nodes["qr-output"].hidden, true);
 assert.ok(nodes.status.textContent.includes("保存失敗"));
+// 作成に失敗したらQRは描かない。
+assert.equal(rendered.length, 0);
+assert.equal(nodes["qr-image"].children.length, 0);
 // A later answer edit cannot replace the content the sender confirmed.
 failCreate = false;
 source.items.q1.value = "確認後に更新された回答";
@@ -178,6 +190,12 @@ assert.equal(created[0].payload.items.q1.value, "<img src=x onerror=alert(1)>");
 assert.ok(!Object.hasOwn(created[0].payload.items, "q2"));
 assert.equal(nodes["qr-output"].hidden, false);
 assert.equal(nodes["confirm-share"].checked, false);
+// QRにするのは作成で返ったURLだけ。画像はこのページの中で描く。
+assert.deepEqual(rendered.map(item => item.url), ["http://localhost/view/test#fixture-only"]);
+assert.equal(rendered[0].doc, root);
+assert.equal(nodes["qr-image"].children.length, 1);
+assert.equal(nodes["qr-image"].children[0].qrUrl, nodes["share-url"].value);
+assert.ok(nodes.status.textContent.includes("QRコード"));
 const opener = nodes["qr-shares"].querySelectorAll("button")[0];
 assert.equal(opener.dataset.shareState, "active");
 assert.equal(opener.children[1].textContent, "開く");
@@ -271,5 +289,6 @@ await nodes["refresh-shares"].fire("click");
 assert.equal(nodes["share-fields"].disabled, true);
 assert.equal(nodes["share-url"].value, "");
 assert.equal(nodes["qr-output"].hidden, true);
+assert.equal(nodes["qr-image"].children.length, 0);
 assert.ok(nodes["qr-shares"].querySelectorAll("button").every(button => button.disabled));
 console.log("Sharing page interactions passed");

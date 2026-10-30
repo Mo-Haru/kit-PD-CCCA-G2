@@ -295,3 +295,11 @@
 .sensitive #confirmation-qr:not([src]) {
   display: none;
 }
+
+/* 共有リンクのQRコード（端末の中で描いたcanvas） */
+.sensitive .qr-image canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  image-rendering: pixelated;
+}

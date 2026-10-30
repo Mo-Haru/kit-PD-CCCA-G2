@@ -8,7 +8,7 @@
   <section class="sensitive answer-demo" id="sharing-page" aria-labelledby="sharing-title">
     <h1 id="sharing-title">共有リンクで試す</h1>
     <p class="page-intro">保存した回答のうち、選んだ範囲だけを共有します。回答を後から保存しても、発行済みの共有内容は自動では変わりません。</p>
-    <p class="demo-notice">QR画像の生成は未実装です。ここでは共有リンクを使って、閲覧・有効期限・停止をテストできます。リンクを知っている人は内容を閲覧できます。</p>
+    <p class="demo-notice">共有リンクとそのQRコードを作り、閲覧・有効期限・停止をテストできます。リンクやQRコードを手に入れた人は内容を閲覧できます。</p>
     <p id="lock-state" role="status" aria-live="polite">ログイン状態を確認しています。</p>
     <p id="status" class="status-message" role="status" aria-live="polite"></p>
     <div class="actions">
@@ -54,7 +54,8 @@
     </fieldset>
     <section id="qr-output" class="demo-notice" aria-label="作成した共有リンク" hidden>
       <p id="link-facts"></p>
-      <p>リンクは作成直後だけ表示できます。この画面を離れる前にコピーしてください。</p>
+      <div id="qr-image" class="qr-image"></div>
+      <p>リンクとQRコードは作成直後だけ表示できます。この画面を離れる前にコピー・印刷してください。QRコードは見せる相手だけに読み取ってもらい、人目に触れる場所に置かないでください。</p>
       <div class="md-field md-field--raised">
         <label class="md-field-label" for="share-url">共有リンク</label>
         <textarea id="share-url" class="md-field-control secret-link" rows="3" readonly spellcheck="false" autocomplete="off"></textarea>
