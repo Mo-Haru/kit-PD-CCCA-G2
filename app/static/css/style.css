@@ -392,17 +392,33 @@ nav a[aria-current="page"] {
   transition: transform var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-emphasized-decelerate), opacity var(--md-sys-motion-duration-short2) linear;
 }
 
-.menu-toggle[aria-expanded="true"] .menu-line-top {
+/* 開いているときも、ふだんはハンバーガー。カーソルを合わせた（キーボードで選んだ）ときだけ×になる。 */
+.menu-toggle[aria-expanded="true"]:focus-visible .menu-line-top {
   transform: rotate(45deg) translateY(6px);
 }
 
-.menu-toggle[aria-expanded="true"] .menu-line-middle {
+.menu-toggle[aria-expanded="true"]:focus-visible .menu-line-middle {
   transform: scaleX(0);
   opacity: 0;
 }
 
-.menu-toggle[aria-expanded="true"] .menu-line-bottom {
+.menu-toggle[aria-expanded="true"]:focus-visible .menu-line-bottom {
   transform: rotate(-45deg) translateY(-6px);
+}
+
+@media (hover: hover) {
+  .menu-toggle[aria-expanded="true"]:hover .menu-line-top {
+    transform: rotate(45deg) translateY(6px);
+  }
+
+  .menu-toggle[aria-expanded="true"]:hover .menu-line-middle {
+    transform: scaleX(0);
+    opacity: 0;
+  }
+
+  .menu-toggle[aria-expanded="true"]:hover .menu-line-bottom {
+    transform: rotate(-45deg) translateY(-6px);
+  }
 }
 
 .menu-toggle,
@@ -843,6 +859,7 @@ footer p {
 
 @media (min-width: 960px) {
   .site-layout {
+    --menu-rail-width: 80px;
     grid-template-columns: var(--md-comp-navigation-drawer-container-width) minmax(0, 1fr);
     padding: 0 16px 16px 0;
   }
@@ -858,31 +875,44 @@ footer p {
     --menu-easing: var(--md-sys-motion-easing-emphasized-decelerate);
   }
 
-  .site-layout[data-menu-open="false"] {
-    grid-template-columns: 0px minmax(0, 1fr);
-    padding-inline-start: 16px;
+  /* 閉じたときは、アイコンだけの細いレール（幅80px）を左に残す。 */
+  :is(.site-layout[data-menu-open="false"], html[data-menu-pref="closed"] .site-layout:not([data-menu-ready])) {
+    grid-template-columns: var(--menu-rail-width) minmax(0, 1fr);
   }
 
   .site-layout[data-menu-ready="true"] .site-menu {
     min-width: 0;
-    visibility: visible;
-    transition: visibility 0s;
   }
 
   .site-layout[data-menu-ready="true"] :is(.menu-heading, .menu-scroll) {
     width: var(--md-comp-navigation-drawer-container-width);
     min-width: var(--md-comp-navigation-drawer-container-width);
-    transform: translateX(0);
-    transition: transform var(--menu-duration) var(--menu-easing);
   }
 
-  .site-layout[data-menu-open="false"] .site-menu {
-    visibility: hidden;
-    transition-delay: var(--menu-duration);
+  .site-layout[data-menu-ready="true"] .site-menu nav a {
+    width: 100%;
+    transition: width var(--menu-duration) var(--menu-easing);
   }
 
-  .site-layout[data-menu-open="false"] :is(.menu-heading, .menu-scroll) {
-    transform: translateX(-100%);
+  .site-layout[data-menu-ready="true"] .nav-label,
+  .site-layout[data-menu-ready="true"] .menu-heading h2 {
+    transition: opacity var(--menu-duration) var(--menu-easing);
+  }
+
+  /* 項目は、アイコンの丸い枠（56px）だけにする。文字は見せない（読み上げには残る）。 */
+  :is(.site-layout[data-menu-open="false"], html[data-menu-pref="closed"] .site-layout:not([data-menu-ready])) .site-menu nav a {
+    width: 56px;
+    height: 56px;
+    overflow: hidden;
+  }
+
+  :is(.site-layout[data-menu-open="false"], html[data-menu-pref="closed"] .site-layout:not([data-menu-ready])) :is(.nav-label, .menu-heading h2) {
+    opacity: 0;
+  }
+
+  /* 項目名は折り返さない。折り返すと、幅が狭いレールで項目が縦に伸びて、間隔が不ぞろいになる。 */
+  .nav-label {
+    white-space: nowrap;
   }
 }
 
@@ -1001,6 +1031,8 @@ footer p {
   .site-layout[data-menu-ready="true"],
   .site-layout[data-menu-ready="true"] .site-menu,
   .site-layout[data-menu-ready="true"] :is(.menu-heading, .menu-scroll),
+  .site-layout[data-menu-ready="true"] .site-menu nav a,
+  .site-layout[data-menu-ready="true"] :is(.nav-label, .menu-heading h2),
   .menu-line,
   .menu-toggle::after,
   .menu-close::after,

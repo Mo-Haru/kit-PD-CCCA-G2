@@ -30,6 +30,7 @@ let confirmationLink = "";
 function show(text) {
   status.textContent = text;
   if (node("family-detail")?.open) node("family-detail-status").textContent = text;
+  if (node("invite-dialog")?.open) node("invite-dialog-status").textContent = text;
 }
 
 function syncFamilyControls() {
@@ -39,9 +40,46 @@ function syncFamilyControls() {
   control.dataset.unlockState = ready ? "unlocked" : "locked";
   control.disabled = !authenticated || unlocking || ready;
   for (const id of ["invite-open", "invite-qr"]) node(id).disabled = !ready || unlocking;
+  node("invite-start").disabled = !authenticated;
+  node("invite-unlock").hidden = !authenticated || ready;
+  node("invite-unlock").disabled = unlocking;
+  node("family-edit").disabled = !authenticated || !hasActiveFamily;
+  if (!hasActiveFamily) setEditing(false);
   // 共有の開始は、共有できる家族がいるときだけ。ロック解除は開始後の画面で行う。
   node("share-start").disabled = !authenticated || !hasActiveFamily;
   node("share-start-help").hidden = !authenticated || hasActiveFamily;
+}
+
+// 家族の一覧は、「編集」を押したときだけ「家族から外す」を出す。
+let editing = false;
+function setEditing(value) {
+  editing = value;
+  node("connections").dataset.editing = String(value);
+  node("family-edit").textContent = value ? "完了" : "編集";
+  node("family-edit").setAttribute("aria-pressed", String(value));
+}
+
+function closeInvite() {
+  // 招待リンクとQRコードは、閉じたら消す。
+  node("invite-link").textContent = "";
+  node("invite-qr-output").replaceChildren();
+  node("invite-output").hidden = true;
+  if (node("invite-dialog").open) node("invite-dialog").close();
+  node("invite-start").focus?.();
+}
+
+// 上の数の表示。件数は、画面に出している一覧と同じ数え方にする。
+function showStats(stats) {
+  const text = value => (value === null ? "—" : String(value));
+  node("stat-family").textContent = text(stats?.family ?? null);
+  node("stat-sharing").textContent = text(stats?.sharing ?? null);
+  node("stat-received").textContent = text(stats?.received ?? null);
+  node("stat-attention").textContent = text(stats?.attention ?? null);
+  const attention = (stats?.attention ?? 0) > 0;
+  node("stat-attention-tile").dataset.attention = String(attention);
+  // 色だけで伝えない。印と文言も出す。
+  node("stat-attention-mark").textContent = attention ? "⚠ " : "";
+  node("stat-attention-note").textContent = attention ? "確認してください" : "対応が必要なものはありません";
 }
 
 function button(label, action) {
@@ -75,12 +113,11 @@ async function syncAccess() {
   if (knownUser && knownUser !== session.user_id) {
     answersReady = false;
     decryptedAnswers = null;
-    node("invite-link").textContent = "";
-    node("invite-qr-output").replaceChildren();
-    node("invite-output").hidden = true;
+    closeInvite();
     confirmationLink = "";
     hideConfirmation(node);
     closeFamilyDetail();
+    showStats(null);
     syncFamilyControls();
     throw new Error("アカウントが変わりました。ページを開き直してください。");
   }
@@ -384,6 +421,15 @@ async function refresh() {
   }
   connections.replaceChildren();
   hasActiveFamily = connectionBody.connections.some(connection => connection.status === "active");
+  showStats({
+    family: connectionBody.connections.filter(connection => connection.status === "active").length,
+    sharing: ownBody.shares.filter(share => shareState(share) === "active").length,
+    received: receivedBody.shares.filter(share => shareState(share) === "active").length,
+    // 家族登録の確認待ちと、相手の鍵が変わって再共有が必要な共有。
+    attention: invitationBody.invitations.filter(invitation => invitation.status === "awaiting_sender").length
+      + ownBody.shares.filter(share => shareState(share) === "key_pending").length,
+  });
+  if (!connectionBody.connections.length) connections.textContent = "家族はまだいません。「家族の招待」から招待してください。";
   for (const connection of connectionBody.connections) {
     const item = document.createElement("li");
     item.className = "record-card";
@@ -394,13 +440,19 @@ async function refresh() {
     state.textContent = connection.status === "active" ? "✓" : "−";
     state.setAttribute("role", "img");
     state.setAttribute("aria-label", connection.status === "active" ? "共有できる家族" : "登録解除済み");
-    item.append(state, name);
-    if (connection.status === "active") {
-      item.append(button("家族から外す", async () => {
+    if (connection.status !== "active") item.append(state, name);
+    else {
+      // 編集中だけ、名前の左に赤い削除ボタンを出す。
+      const displayName = connection.other_display_name || "家族";
+      const remove = button("削除", async () => {
+        if (!globalThis.confirm(`${displayName} さんを家族から外しますか？\n${displayName} さんへの共有は止まります。相手が保存済みの内容は消せません。`)) return;
         await api(`/api/v1/family/connections/${connection.id}/disconnect`, { method: "POST", body: {} });
         show("家族の登録を解除し、共有を停止しました。相手が保存済みの内容は消せません。");
         await refresh();
-      }));
+      });
+      remove.className = "family-remove button-danger";
+      remove.setAttribute("aria-label", `${displayName} さんを家族から外す`);
+      item.append(remove, state, name);
     }
     connections.append(item);
   }
@@ -430,6 +482,11 @@ async function refresh() {
 if (document.querySelector("#family-page")) {
   node("unlock-here").addEventListener("click", () => unlockFamily().catch(showError));
   node("share-start").addEventListener("click", () => globalThis.location.assign("/family/share"));
+  node("family-edit").addEventListener("click", () => setEditing(!editing));
+  node("invite-start").addEventListener("click", () => node("invite-dialog").showModal());
+  for (const id of ["invite-close-top", "invite-close-bottom"]) node(id).addEventListener("click", closeInvite);
+  node("invite-dialog").addEventListener("cancel", event => { event.preventDefault(); closeInvite(); });
+  node("invite-unlock").addEventListener("click", () => unlockFamily().catch(showError));
   node("invite-open").addEventListener("click", () => createInvitation(false).catch(showError));
   node("invite-qr").addEventListener("click", () => createInvitation(true).catch(showError));
   for (const id of ["family-close-top", "family-close-bottom"]) node(id).addEventListener("click", closeFamilyDetail);

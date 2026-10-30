@@ -27,11 +27,11 @@ class Element {
 
 const ids = ["family-share-page", "share-steps", "lock-state", "status", "step-unlock", "step-select", "step-target",
   "step-confirm", "step-done", "login-here", "unlock-here", "chapters", "questions", "all-answers", "no-family",
-  "connection", "expires-at", "preview-output", "confirm-share", "done-text", "step-back", "step-next", "share", "share-title"];
+  "connection", "expires-at", "expires-unlimited", "preview-output", "confirm-share", "done-text", "step-back", "step-next", "share", "share-title"];
 
-function setup({ updateId = null, authenticated = true } = {}) {
+function setup({ updateId = null, authenticated = true, unlockFails = false } = {}) {
   const nodes = Object.fromEntries(ids.map(id => [id, new Element()]));
-  const scopes = ["all", "chapters", "questions"].map(value => Object.assign(new Element(), { tagName: "INPUT", value, checked: value === "questions" }));
+  const scopes = ["all", "chapters", "questions"].map(value => Object.assign(new Element(), { tagName: "INPUT", value, checked: false }));
   const root = {
     querySelector(selector) {
       if (selector === "input[name=scope]:checked") return scopes.find(input => input.checked);
@@ -41,13 +41,17 @@ function setup({ updateId = null, authenticated = true } = {}) {
     createElement(tag) { const node = new Element(); node.tagName = tag.toUpperCase(); node.ownerDocument = root; return node; },
     createTextNode(text) { const node = new Element(); node.textContent = text; return node; },
   };
-  const state = { unlocked: false, keyId: "key-A", reauth: false, created: [], updated: [], shares: [{
+  const state = { unlocked: false, unlockCalls: 0, allowUnlock: false, keyId: "key-A", reauth: false, created: [], updated: [], shares: [{
     id: "share-1", status: "active", connection_id: "conn-1", recipient_user_id: "user-2",
     recipient_display_name: "家族A", current_version: 3, expires_at: null,
   }] };
   const client = {
     getUnlockState: () => ({ unlocked: state.unlocked }),
-    async unlock() { state.unlocked = true; },
+    async unlock() {
+      state.unlockCalls += 1;
+      if (unlockFails && !state.allowUnlock) throw Object.assign(new Error("cancel"), { name: "NotAllowedError" });
+      state.unlocked = true;
+    },
     async api(path) {
       if (path.endsWith("/auth/session")) return authenticated ? { authenticated: true, user_id: "u1", display_name: "テスト" } : { authenticated: false };
       if (path.endsWith("/answers/questions")) return { categories: [{ id: "c1", name: "章1" }],
@@ -74,29 +78,43 @@ function setup({ updateId = null, authenticated = true } = {}) {
 }
 const text = element => [element.textContent, ...element.children.map(text)].join("\n");
 const visibleSteps = nodes => ["unlock", "select", "target", "confirm", "done"].filter(id => !nodes[`step-${id}`].hidden);
-const labels = nodes => nodes["share-steps"].children.map(item => item.textContent);
+const labels = nodes => nodes["share-steps"].children.map(item => item.children[0].textContent);
+const chip = (nodes, index) => nodes["share-steps"].children[index].children[0];
+const pick = async (nodes, scopes, value) => {
+  scopes.forEach(input => { input.checked = input.value === value; });
+  await scopes[0].fire("change");
+};
 const click = (nodes, id) => nodes[id].fire("click");
 
 // --- 新しい共有：ロック解除 → 内容 → 家族と期限 → 再確認 → 確定 ---
 {
-  const { nodes, state, bind } = setup();
+  const { nodes, scopes, state, bind } = setup();
   await bind();
-  assert.deepEqual(visibleSteps(nodes), ["unlock"]);
+  // 開いたらすぐ解除を始め、解除できたら共有範囲の選択へ進む。
+  assert.equal(state.unlockCalls, 1);
+  assert.deepEqual(visibleSteps(nodes), ["select"]);
   assert.deepEqual(labels(nodes), ["1. ロック解除", "2. 共有内容の選択", "3. 家族と期限", "4. 再確認"]);
-  assert.equal(nodes["share-steps"].children[0].dataset.stepState, "current");
-  assert.equal(nodes["unlock-here"].disabled, false);
-  assert.equal(nodes["step-next"].disabled, true, "解除するまで次へ進めない");
-  assert.equal(nodes["step-back"].hidden, true);
-  assert.equal(nodes["share"].hidden, true);
-  // 解除前は、回答を暗号文で見せる。
-  assert.ok(text(nodes.questions).includes("暗号化中："));
-  await click(nodes, "unlock-here");
+  assert.equal(nodes["share-steps"].children[1].dataset.stepState, "current");
+  assert.equal(nodes["share-steps"].children[0].dataset.stepState, "done");
+  assert.ok(nodes.status.textContent.includes("共有範囲を選択してください"));
+  assert.ok(text(nodes.questions).includes("<b>回答1</b>"), "解除後は回答を表示する（文字として）");
+  // 範囲は最初は未選択。選ぶまで一覧も出さず、次へも進めない。
+  assert.equal(scopes.some(input => input.checked), false);
+  assert.equal(nodes.chapters.hidden && nodes.questions.hidden && nodes["all-answers"].hidden, true);
+  assert.equal(nodes["step-next"].disabled, true);
+  await pick(nodes, scopes, "questions");
+  assert.equal(nodes.questions.hidden, false);
+  assert.equal(nodes["step-next"].disabled, true, "質問を選ぶまで次へ進めない");
+  // 終わったロック解除の手順には、押して戻れる。先の手順は押せない。
+  assert.equal(chip(nodes, 0).disabled, false);
+  assert.equal(chip(nodes, 1).disabled, true);
+  assert.equal(chip(nodes, 2).disabled, true);
+  await chip(nodes, 0).fire("click");
+  assert.deepEqual(visibleSteps(nodes), ["unlock"]);
   assert.equal(nodes["unlock-here"].textContent, "解除済み");
-  assert.equal(nodes["step-next"].disabled, false);
+  assert.equal(state.unlockCalls, 1, "戻っても、解除をやり直さない");
   await click(nodes, "step-next");
   assert.deepEqual(visibleSteps(nodes), ["select"]);
-  assert.ok(text(nodes.questions).includes("<b>回答1</b>"), "解除後は回答を表示する（文字として）");
-  assert.equal(nodes["step-next"].disabled, true, "何も選ばないと次へ進めない");
   // 家族の選択肢は共有できる家族だけ。
   assert.deepEqual(nodes.connection.children.map(option => option.textContent), ["家族A"]);
   nodes.connection.value = nodes.connection.children[0].value;
@@ -106,12 +124,23 @@ const click = (nodes, id) => nodes[id].fire("click");
   await click(nodes, "step-next");
   assert.deepEqual(visibleSteps(nodes), ["target"]);
   assert.equal(nodes["step-next"].disabled, false);
+  // 選んだ手順にも、押して戻れる。
+  await chip(nodes, 1).fire("click");
+  assert.deepEqual(visibleSteps(nodes), ["select"]);
+  assert.equal(nodes.questions.querySelectorAll("input")[0].checked, true, "戻っても選択は残る");
+  await click(nodes, "step-next");
   nodes["expires-at"].value = new Date(Date.now() - 3600000).toISOString();
   await nodes["expires-at"].fire("input");
   assert.equal(nodes["step-next"].disabled, true, "過去の期限では進めない");
   nodes["expires-at"].value = new Date(Date.now() + 86400000).toISOString();
   await nodes["expires-at"].fire("input");
   assert.equal(nodes["step-next"].disabled, false);
+  // 「無制限」で期限を空にして、期限なしにできる。
+  await click(nodes, "expires-unlimited");
+  assert.equal(nodes["expires-at"].value, "");
+  assert.equal(nodes["step-next"].disabled, false);
+  nodes["expires-at"].value = new Date(Date.now() + 86400000).toISOString();
+  await nodes["expires-at"].fire("input");
   await click(nodes, "step-next");
   // 再確認
   assert.deepEqual(visibleSteps(nodes), ["confirm"]);
@@ -120,8 +149,15 @@ const click = (nodes, id) => nodes[id].fire("click");
   assert.equal(nodes["share"].disabled, true, "確認のチェックまで確定できない");
   const preview = text(nodes["preview-output"]);
   assert.ok(preview.includes("相手：家族A") && preview.includes("鍵：key-A") && preview.includes("範囲：質問"));
+  assert.ok(preview.includes("期限：") && !preview.includes("期限：なし"));
   assert.ok(preview.includes("<b>回答1</b>") && !preview.includes("回答2"));
   assert.equal(nodes["share-steps"].children[3].dataset.stepState, "current");
+  // 手順の表示から戻っても、確認は消える。
+  await chip(nodes, 1).fire("click");
+  assert.deepEqual(visibleSteps(nodes), ["select"]);
+  assert.equal(nodes["preview-output"].children.length, 0);
+  await click(nodes, "step-next");
+  await click(nodes, "step-next");
   // 戻ると確認が消え、進み直すと作り直す。
   await click(nodes, "step-back");
   assert.deepEqual(visibleSteps(nodes), ["target"]);
@@ -153,16 +189,14 @@ const click = (nodes, id) => nodes[id].fire("click");
   assert.equal(nodes["share"].hidden, true);
   assert.equal(nodes["step-back"].hidden, true);
   assert.equal(nodes["share-steps"].children.every(item => item.dataset.stepState === "done"), true);
+  assert.equal(nodes["share-steps"].children.every(item => item.children[0].disabled), true, "共有後は手順へ戻れない");
 }
 
 // --- 期限なし・章の選択・全体、本人確認が切れたとき ---
 {
   const { nodes, scopes, state, bind } = setup();
   await bind();
-  await click(nodes, "unlock-here");
-  await click(nodes, "step-next");
-  scopes.forEach(input => { input.checked = input.value === "chapters"; });
-  await scopes[0].fire("change");
+  await pick(nodes, scopes, "chapters");
   assert.equal(nodes.chapters.hidden, false);
   assert.equal(nodes.questions.hidden, true);
   assert.equal(nodes["step-next"].disabled, true);
@@ -178,11 +212,26 @@ const click = (nodes, id) => nodes[id].fire("click");
   await click(nodes, "share");
   assert.equal(state.created.length, 0);
   assert.deepEqual(visibleSteps(nodes), ["unlock"], "本人確認が切れたら、最初のロック解除に戻る");
+  assert.equal(nodes["unlock-here"].disabled, false);
   assert.ok(nodes.status.textContent.includes("もう一度解除"));
   assert.equal(nodes["preview-output"].children.length, 0);
-  scopes.forEach(input => { input.checked = input.value === "all"; });
-  await scopes[0].fire("change");
+  await pick(nodes, scopes, "all");
   assert.equal(nodes["all-answers"].hidden, false);
+}
+
+// --- 自動の解除を取り消したとき：ボタンで続けられる ---
+{
+  const { nodes, state, bind } = setup({ unlockFails: true });
+  await bind();
+  assert.equal(state.unlockCalls, 1);
+  assert.deepEqual(visibleSteps(nodes), ["unlock"]);
+  assert.ok(nodes.status.textContent.includes("もう一度"));
+  assert.equal(nodes["unlock-here"].disabled, false);
+  assert.equal(nodes["step-next"].disabled, true);
+  state.allowUnlock = true;
+  await click(nodes, "unlock-here");
+  assert.equal(state.unlockCalls, 2);
+  assert.deepEqual(visibleSteps(nodes), ["select"], "手動で解除しても、共有範囲の選択へ進む");
 }
 
 // --- ログインしていない ---
@@ -192,16 +241,17 @@ const click = (nodes, id) => nodes[id].fire("click");
   assert.equal(nodes["login-here"].hidden, false);
   assert.equal(nodes["unlock-here"].hidden, true);
   assert.equal(nodes["step-next"].disabled, true);
+  assert.equal(chip(nodes, 0).disabled, true);
 }
 
 // --- 共有の更新：家族と期限の手順は省く ---
 {
-  const { nodes, state, bind } = setup({ updateId: "share-1" });
+  const { nodes, scopes, state, bind } = setup({ updateId: "share-1" });
   await bind();
   assert.deepEqual(labels(nodes), ["1. ロック解除", "2. 共有内容の選択", "3. 再確認"]);
   assert.ok(nodes["share-title"].textContent.includes("家族A"));
-  await click(nodes, "unlock-here");
-  await click(nodes, "step-next");
+  assert.deepEqual(visibleSteps(nodes), ["select"]);
+  await pick(nodes, scopes, "questions");
   nodes.questions.querySelectorAll("input")[1].checked = true;
   await nodes.questions.fire("change");
   await click(nodes, "step-next");
@@ -232,6 +282,7 @@ for (const shares of [[], [{ id: "share-1", status: "stopped", connection_id: "c
   state.shares = shares;
   await bind();
   assert.ok(nodes.status.textContent.includes("更新する共有が見つかりません"));
+  assert.equal(state.unlockCalls, 0, "更新できない共有では、解除を始めない");
   await click(nodes, "unlock-here");
   assert.equal(nodes["step-next"].disabled, true, "更新できない共有では、解除しても先へ進めない");
 }

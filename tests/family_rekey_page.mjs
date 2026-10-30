@@ -131,7 +131,7 @@ function createDocument() {
   doc.body = body;
   const ids = [
     "status", "lock-state", "incoming", "connections", "shares", "received",
-    "family-page", "history-view", "received-view", "share-start", "share-start-help",
+    "family-page", "family-edit", "invite-start", "invite-dialog", "invite-dialog-status", "invite-close-top", "invite-close-bottom", "invite-unlock", "stat-family", "stat-sharing", "stat-received", "stat-attention", "stat-attention-tile", "stat-attention-mark", "stat-attention-note", "history-view", "received-view", "share-start", "share-start-help",
     "invite-link", "login-here",
     "unlock-here", "invite-open", "copy-invite", "accept-open",
     "invite-qr", "invite-qr-output", "invite-output", "encrypted-answers", "answer-ciphertext",
@@ -243,6 +243,7 @@ globalThis.fetch = async (path, options = {}) => {
     invitation: { id: "inv-in", status: "awaiting_sender" },
     confirmation: { token: "t".repeat(43), code: "WXYZ-2345", confirm_path: "/family/confirm", expires_at: "2099-01-01T00:00:00Z" },
   });
+  if (path === "/api/v1/family/connections/conn-1/disconnect" && method === "POST") return reply(200, { ok: true });
   if (path === "/api/v1/family/connections") {
     return reply(200, {
       connections: [{ id: "conn-1", status: "active", other_user_id: "user-2", other_display_name: "家族" }],
@@ -355,8 +356,31 @@ function buttonNamed(label) {
 }
 
 await waitFor(() => document.querySelector("#shares").children.length > 0 && document.querySelector("#connections").children.length > 0);
+check("dashboard counts active families", document.querySelector("#stat-family").textContent === "1");
+check("dashboard counts shares that are running (not key_pending or expired)", document.querySelector("#stat-sharing").textContent === "0");
+check("dashboard counts received shares", document.querySelector("#stat-received").textContent === "1");
+check("a share that needs re-sharing is counted as needing attention", document.querySelector("#stat-attention").textContent === "1" && document.querySelector("#stat-attention-tile").dataset.attention === "true");
+check("attention is not shown by color alone", document.querySelector("#stat-attention-mark").textContent.includes("⚠") && document.querySelector("#stat-attention-note").textContent === "確認してください");
 check("family list shows the active family", textOf(document.querySelector("#connections")).includes("家族"));
 check("share start is available with an active family", document.querySelector("#share-start").disabled === false && document.querySelector("#share-start-help").hidden === true);
+check("edit and invite buttons are available", document.querySelector("#family-edit").disabled === false && document.querySelector("#invite-start").disabled === false);
+check("removal buttons start hidden", document.querySelector("#connections").dataset.editing === "false" && document.querySelector("#family-edit").textContent === "編集");
+await document.querySelector("#family-edit").click();
+check("edit shows the removal buttons", document.querySelector("#connections").dataset.editing === "true" && document.querySelector("#family-edit").textContent === "完了");
+const familyRow = document.querySelector("#connections").children[0];
+check("the red delete button is left of the name", familyRow.children[0].className.includes("family-remove") && familyRow.children[0].className.includes("button-danger") && familyRow.children[0].textContent === "削除");
+check("the delete button names who it removes", familyRow.children[0]["aria-label"] === "家 さんを家族から外す" || familyRow.children[0]["aria-label"].endsWith("さんを家族から外す"));
+check("no old text button remains", buttonNamed("家族から外す") === null);
+confirmStop = false;
+await familyRow.children[0].click();
+check("delete asks before removing and cancel sends nothing", stopPrompts.at(-1).includes("家族から外しますか") && !calls.some(item => item.path.includes("/disconnect")));
+confirmStop = true;
+await familyRow.children[0].click();
+check("confirmed delete disconnects the family", calls.filter(item => item.path === "/api/v1/family/connections/conn-1/disconnect").length === 1);
+confirmStop = false;
+stopPrompts.length = 0;
+await document.querySelector("#family-edit").click();
+check("done hides the removal buttons again", document.querySelector("#connections").dataset.editing === "false");
 await document.querySelector("#share-start").click();
 check("share start opens the separate share page", navigations.at(-1) === "/family/share");
 check("the list page no longer holds the share form", document.querySelector("#show-preview") === null && document.querySelector("#share") === null);
@@ -397,12 +421,16 @@ await document.querySelector("#received").children[0].children[0].click();
 check("received modal decrypts family answer", textOf(document.querySelector("#family-detail-body")).includes("家族から届いたダミー回答"));
 check("received modal has no sender-only stop action", document.querySelector("#family-stop-top").hidden && document.querySelector("#family-stop-bottom").hidden);
 await document.querySelector("#family-close-top").click();
+await document.querySelector("#invite-start").click();
+check("the invite button opens the invite dialog", document.querySelector("#invite-dialog").open);
 await document.querySelector("#invite-qr").click();
 const image = document.querySelector("#invite-qr-output").children[0];
 check("invite QR is generated locally", image && image.src.startsWith("data:image/gif;base64,"));
 const inviteUrl = new URL(document.querySelector("#invite-link").textContent);
 check("invitation token stays out of query parameters", inviteUrl.pathname === "/family/invite" && inviteUrl.search === "" && inviteUrl.hash.includes("token="));
 check("QR opens the same dedicated invitation page", document.querySelector("#invite-output").hidden === false);
+await document.querySelector("#invite-close-bottom").click();
+check("closing the invite dialog removes the link and QR", !document.querySelector("#invite-dialog").open && document.querySelector("#invite-link").textContent === "" && document.querySelector("#invite-output").hidden === true);
 
 // 申請が届いても、表示名だけでは追加できない。申請者本人から受け取ったコードで追加する。
 invitationList = [
@@ -410,6 +438,8 @@ invitationList = [
   { id: "inv-in", kind: "open", status: "awaiting_sender", incoming: true, sender_display_name: "招待した家族" },
 ];
 await document.querySelector("#invite-open").click();
+check("invitations waiting for confirmation count as needing attention", document.querySelector("#stat-attention").textContent === "2");
+check("a stopped share is no longer counted as sharing", document.querySelector("#stat-sharing").textContent === "0");
 check("no code-less add button remains", buttonNamed("家族に追加") === null);
 const codeInput = document.querySelector("#confirm-code-inv-out");
 check("sender sees a code field", codeInput && codeInput.tag === "input");

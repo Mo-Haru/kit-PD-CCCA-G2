@@ -42,13 +42,21 @@ export function bindFamilyShare(root, client = {
     return [...node(group).querySelectorAll("input:checked")].map(input => input.value);
   }
   function selection() {
-    const scope = root.querySelector("input[name=scope]:checked")?.value || "questions";
-    if (scope === "all") return { scope };
+    // 範囲は、最初は未選択。
+    const scope = root.querySelector("input[name=scope]:checked")?.value || null;
+    if (scope === null || scope === "all") return { scope };
     return { scope, ids: checked(scope === "chapters" ? "chapters" : "questions") };
   }
   function hasSelection() {
     const chosen = selection();
+    if (chosen.scope === null) return false;
     return chosen.scope === "all" ? catalog.questions.length > 0 : chosen.ids.length > 0;
+  }
+  function selectionProblem() {
+    const chosen = selection();
+    if (chosen.scope === null) return "共有範囲（全体・章・質問）を選んでください。";
+    if (chosen.scope === "all") return catalog.questions.length > 0 ? "" : "共有できる質問がありません。";
+    return chosen.ids.length > 0 ? "" : chosen.scope === "chapters" ? "共有する章を1つ以上選んでください。" : "共有する質問を1つ以上選んでください。";
   }
   function expiryProblem() {
     const input = node("expires-at");
@@ -61,19 +69,23 @@ export function bindFamilyShare(root, client = {
     if (unavailable) return unavailable;
     const step = steps[current].id;
     if (step === "unlock") return unlocked() ? "" : "回答の暗号化を解除してください。";
-    if (step === "select") {
-      return hasSelection() ? "" : selection().scope === "chapters" ? "共有する章を1つ以上選んでください。" : "共有する質問を1つ以上選んでください。";
-    }
+    if (step === "select") return selectionProblem();
     if (step === "target") return node("connection").value ? expiryProblem() : "共有できる家族がいません。";
     return "";
   }
 
   function renderSteps() {
+    // 終わった手順は、押して戻れる。先へは「次へ」で進む。
     node("share-steps").replaceChildren(...steps.map((step, index) => {
       const item = root.createElement("li");
-      item.textContent = `${index + 1}. ${step.label}`;
+      const chip = root.createElement("button");
+      chip.type = "button";
+      chip.textContent = `${index + 1}. ${step.label}`;
+      chip.disabled = finished || busy || unlocking || index >= current;
+      chip.addEventListener("click", () => jump(index));
       item.dataset.stepState = finished || index < current ? "done" : index === current ? "current" : "todo";
       if (!finished && index === current) item.setAttribute("aria-current", "step");
+      item.append(chip);
       return item;
     }));
   }
@@ -104,6 +116,12 @@ export function bindFamilyShare(root, client = {
   function goto(index) {
     current = index;
     controls();
+  }
+  function jump(index) {
+    if (finished || busy || unlocking || index < 0 || index >= current) return;
+    clearConfirmation();
+    show("");
+    goto(index);
   }
 
   const answerViews = [];
@@ -164,7 +182,7 @@ export function bindFamilyShare(root, client = {
     scopeVisibility();
   }
   function scopeVisibility() {
-    const scope = root.querySelector("input[name=scope]:checked")?.value || "questions";
+    const scope = root.querySelector("input[name=scope]:checked")?.value || null;
     node("chapters").hidden = scope !== "chapters";
     node("questions").hidden = scope !== "questions";
     node("all-answers").hidden = scope !== "all";
@@ -282,7 +300,9 @@ export function bindFamilyShare(root, client = {
       const loaded = await client.loadAnswerDocument();
       answerDocument = loaded.document;
       answersReady = true;
-      show("回答の暗号化を解除しました。「次へ」で共有する内容を選びます。");
+      // 解除したら、共有範囲の選択へ進む。
+      if (steps[current].id === "unlock") current += 1;
+      show("回答の暗号化を解除しました。共有範囲を選択してください。");
     } finally { unlocking = false; controls(); }
   }
   async function submit() {
@@ -339,11 +359,12 @@ export function bindFamilyShare(root, client = {
     if (steps[current + 1].id === "confirm") await buildConfirmation();
     else goto(current + 1);
   }));
-  node("step-back").addEventListener("click", () => {
-    if (busy || current === 0) return;
+  node("step-back").addEventListener("click", () => jump(current - 1));
+  node("expires-unlimited").addEventListener("click", () => {
+    node("expires-at").value = "";
     clearConfirmation();
-    show("");
-    goto(current - 1);
+    show("期限なしで共有します。");
+    controls();
   });
   node("share").addEventListener("click", () => run(submit));
   node("confirm-share").addEventListener("change", controls);
@@ -381,6 +402,8 @@ export function bindFamilyShare(root, client = {
       }
       node("share-title").textContent = `${updating.recipient_display_name || "家族"} さんへの共有を更新する`;
     }
+    // 開いたらすぐ、パスキーの確認（解除）を始める。取り消したときは、ボタンで続ける。
+    if (!unlocked()) await unlockAnswers();
   });
 }
 

@@ -179,7 +179,20 @@ def test_family_has_dedicated_invitation_and_shared_answer_dialog(client):
     assert markup.one_id("share-start").tag == "button"
     for form_id in ("show-preview", "share", "confirm-share", "expires-at", "connection"):
         assert not any(element.attrs.get("id") == form_id for element in markup.elements)
-    markup.one_id("connections")
+    # ダッシュボード：上に4つの数、下にカード（家族・招待・共有したもの・共有されたもの）。
+    for stat in ("stat-family", "stat-sharing", "stat-received", "stat-attention"):
+        markup.one_id(stat)
+    assert markup.one_id("stat-attention-tile").attrs["data-attention"] == "false"
+    # 家族のカードは2枚分の幅で、右上に「編集」「家族の招待」。招待のカードはない。
+    wide = markup.one_id("connections").ancestors[-1]
+    assert "dash-card-wide" in wide.attrs["class"].split()
+    for button_id in ("family-edit", "invite-start"):
+        assert wide in markup.one_id(button_id).ancestors
+    assert markup.one_id("invite-dialog").tag == "dialog"
+    assert wide not in markup.one_id("invite-open").ancestors
+    assert not any(element.attrs.get("aria-labelledby") == "dash-invite-title" for element in markup.elements)
+    for list_id in ("connections", "incoming", "shares", "received"):
+        assert any("dash-card" in (ancestor.attrs.get("class") or "").split() for ancestor in markup.one_id(list_id).ancestors)
     markup.one_id("shares")
     markup.one_id("received")
     invite = StrictMarkup(client.get("/family/invite").get_data(as_text=True))
@@ -258,6 +271,17 @@ def test_family_share_page_is_a_stepwise_flow(client):
     for control in ("unlock-here", "step-next", "share", "confirm-share"):
         assert "disabled" in markup.one_id(control).attrs
     assert markup.one_id("back-to-family").attrs["href"] == "/family"
+    # 戻るリンクは、見出しと同じ行（右上）にある。
+    heading = markup.one_id("share-title").ancestors[-1]
+    assert heading in markup.one_id("back-to-family").ancestors and "share-heading" in heading.attrs["class"].split()
+    markup.one_id("expires-unlimited")
+    scope_radios = [element for element in markup.elements
+                    if element.tag == "input" and element.attrs.get("name") == "scope"]
+    assert len(scope_radios) == 3 and not any("checked" in radio.attrs for radio in scope_radios), "範囲は最初は未選択"
+    body = response.get_data(as_text=True)
+    for title in ("ロックを解除してください。", "共有範囲を選択してください。", "誰にいつまで共有しますか？",
+                  "共有するには、回答の暗号化を解除する必要があります。"):
+        assert title in body
 
 
 def test_family_share_page_flow():
