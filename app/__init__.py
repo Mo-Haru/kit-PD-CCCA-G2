@@ -86,6 +86,12 @@ def register_error_handlers(app):
             return jsonify(error="not_found", message="見つかりません。"), 404
         return render_template("404.html"), 404
 
+    @app.errorhandler(413)
+    def too_large(_error):
+        if request.path.startswith("/api/"):
+            return jsonify(error="too_large", message="送信データが大きすぎます。"), 413
+        return "送信データが大きすぎます。", 413
+
     @app.errorhandler(ApiError)
     def api_error(error):
         db.session.rollback()

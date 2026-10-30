@@ -84,8 +84,18 @@ def parse_iso(value) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def json_body(limit: int = 800_000) -> dict:
+def json_body() -> dict:
+    """JSONオブジェクトの本文を読む。上限はアプリ全体の MAX_CONTENT_LENGTH。
+
+    Content-Lengthがあれば、本文を読む前に断る。chunkedなどContent-Lengthのない本文は、
+    Werkzeugが上限のバイト数で読み込みを止める（例外は出さずに切り詰める）。
+    そこで上限まで読んだ後、元の入力にまだ続きがあれば超過として断る。解析するのは上限以内の本文だけ。
+    """
+    limit = int(current_app.config["MAX_CONTENT_LENGTH"])
     if request.content_length and request.content_length > limit:
+        raise ApiError("too_large", 413, "送信データが大きすぎます。")
+    raw = request.get_data(cache=True)
+    if request.content_length is None and len(raw) >= limit and request.environ["wsgi.input"].read(1):
         raise ApiError("too_large", 413, "送信データが大きすぎます。")
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
