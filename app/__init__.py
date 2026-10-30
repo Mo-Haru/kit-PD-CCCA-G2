@@ -23,6 +23,7 @@ CSRF_EXEMPT = {
     "protection_api.register_options",
     "protection_api.login_options",
     "protection_api.qr_start",
+    "protection_api.qr_cancel",
     "protection_api.transfer_bind",
 }
 
