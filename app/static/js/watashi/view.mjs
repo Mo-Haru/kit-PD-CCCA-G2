@@ -168,6 +168,14 @@ export function bindQrViewPage(root, {
     status.textContent = text;
   }
 
+  async function endOnServer() {
+    try {
+      await call("/api/v1/qr-view/end", { method: "POST", body: {} });
+    } catch (_error) {
+      /* 期限切れでも端末側の秘密は消す。 */
+    }
+  }
+
   function showFacts(current) {
     const facts = viewFacts(current);
     node("validity").textContent = facts.validity;
@@ -193,11 +201,20 @@ export function bindQrViewPage(root, {
     openButton.disabled = true;
     try {
       const result = await resumeOrStartQr({ api: call, shareId, secrets, resumeOnly: false });
-      if (!isCurrent(ticket)) return;
+      if (!isCurrent(ticket)) {
+        // 開始の通信中に「閲覧を終了」を押すと、その時点の終了はまだセッションが無く空振りする。
+        // 遅れて開始が届いてセッションが作られたので、サーバー側でもここで終了させる。
+        if (ended) void endOnServer();
+        return;
+      }
       storage.setItem(OPENED, shareId);
       await render(result.current, secrets, ticket);
     } catch (error) {
-      if (!isCurrent(ticket)) return;
+      if (!isCurrent(ticket)) {
+        // 開始は届いた後に別の段階で失敗した場合も、作られたセッションを残さない。
+        if (ended) void endOnServer();
+        return;
+      }
       output.replaceChildren();
       show(describeViewError(error));
     } finally {
@@ -257,11 +274,7 @@ export function bindQrViewPage(root, {
     node("updated").textContent = "";
     for (const id of ["open", "reopen", "end"]) node(id).disabled = true;
     show("閲覧を終了し、この端末に置いた秘密を消しました。");
-    try {
-      await call("/api/v1/qr-view/end", { method: "POST", body: {} });
-    } catch (_error) {
-      /* 期限切れでも端末側の秘密は消す。 */
-    }
+    await endOnServer();
   });
 }
 

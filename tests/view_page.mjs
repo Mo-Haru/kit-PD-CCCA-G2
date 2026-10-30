@@ -14,7 +14,7 @@ const payload = { schema: 1, items: { q1: { state: "answered", value: "共有し
 const catalog = { questions: [{ id: "q1", text: "質問" }], categories: [] };
 const current = { id: shareId, status: "active", updated_at: "2026-10-27", session: {} };
 
-function page({ resume = false, stage = null, failEnd = false } = {}) {
+function page({ resume = false, stage = null, failEnd = false, sessionBeforeStart = true } = {}) {
   const storageData = new Map();
   const storage = {
     getItem: key => storageData.get(key) ?? null,
@@ -39,9 +39,20 @@ function page({ resume = false, stage = null, failEnd = false } = {}) {
   async function pause(name) {
     if (stage === name) { reached.resolve(); await gate.promise; }
   }
+  let started = sessionBeforeStart;
   async function call(path) {
     calls.push(path);
-    if (path === "/api/v1/qr-view/current") { await pause("session"); return current; }
+    if (path === `/api/v1/qr-shares/${shareId}/start`) {
+      await pause("start");
+      started = true;
+      calls.push("(start responded)");
+      return { session_id: "view-session" };
+    }
+    if (path === "/api/v1/qr-view/current") {
+      if (!started) throw Object.assign(new Error("閲覧セッションがありません。"), { status: 401, code: "qr_unauthenticated" });
+      await pause("session");
+      return current;
+    }
     if (path === "/api/v1/answers/questions") { await pause("catalog"); return catalog; }
     if (path === "/api/v1/qr-view/end") {
       await endGate.promise;
@@ -110,5 +121,28 @@ for (const resume of [false, true]) {
   assert.equal(test.nodes.output.children.length, 0);
   test.endGate.resolve();
   await ending;
+}
+// The start request is still in flight when the viewer ends: the end request has no session yet,
+// so once the late start creates one, the page must end that session on the server too.
+for (const lateError of [false, true]) {
+  const test = page({ stage: "start", sessionBeforeStart: false, failEnd: lateError });
+  await flush();
+  const opening = test.nodes.open.fire("click");
+  await test.reached.promise;
+  const ending = test.nodes.end.fire("click");
+  test.endGate.resolve();
+  await ending;
+  const endsBeforeStart = test.calls.filter(path => path === "/api/v1/qr-view/end").length;
+  assert.equal(endsBeforeStart, 1);
+  test.gate.resolve();
+  await opening;
+  await flush();
+  const startAt = test.calls.indexOf("(start responded)");
+  assert.ok(startAt > 0);
+  const endsAfterStart = test.calls.slice(startAt + 1).filter(path => path === "/api/v1/qr-view/end").length;
+  assert.equal(endsAfterStart, 1, `late start must be ended on the server (${test.calls.join(", ")})`);
+  assert.equal(test.nodes.output.children.length, 0);
+  assert.equal(readQrSecrets(test.storage, shareId), null);
+  assert.ok(test.nodes.status.textContent.includes("閲覧を終了"));
 }
 console.log("QR viewer termination races passed");
