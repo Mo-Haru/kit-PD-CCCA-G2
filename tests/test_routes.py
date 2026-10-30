@@ -283,6 +283,7 @@ def test_family_share_page_is_a_stepwise_flow(client):
     for control in ("unlock-here", "step-next", "share", "confirm-share"):
         assert "disabled" in markup.one_id(control).attrs
     assert markup.one_id("back-to-family").attrs["href"] == "/family"
+
     # 戻るリンクは、見出しと同じ行（右上）にある。
     heading = markup.one_id("share-title").ancestors[-1]
     assert heading in markup.one_id("back-to-family").ancestors and "share-heading" in heading.attrs["class"].split()
@@ -295,6 +296,22 @@ def test_family_share_page_is_a_stepwise_flow(client):
                   "共有するには、回答の暗号化を解除する必要があります。"):
         assert title in body
 
+
+def test_family_share_login_keeps_the_share_being_updated(client):
+    from urllib.parse import parse_qs, urlsplit
+
+    from tests.test_menu import StrictMarkup
+
+    markup = StrictMarkup(client.get("/family/share?update=share-1").get_data(as_text=True))
+    login = urlsplit(markup.one_id("login-here").attrs["href"])
+    assert login.path == "/auth"
+    # ログインから戻ったとき、新規作成ではなく同じ共有の更新に戻る。
+    assert parse_qs(login.query)["next"] == ["/family/share?update=share-1"]
+    plain = StrictMarkup(client.get("/family/share").get_data(as_text=True))
+    assert parse_qs(urlsplit(plain.one_id("login-here").attrs["href"]).query)["next"] == ["/family/share"]
+    # 戻り先の検証でも、更新の指定（クエリ）は保たれる。
+    page = client.get("/auth?next=" + "/family/share%3Fupdate%3Dshare-1")
+    assert 'data-return-url="/family/share?update=share-1"' in page.get_data(as_text=True)
 
 def test_family_share_page_flow():
     result = subprocess.run(

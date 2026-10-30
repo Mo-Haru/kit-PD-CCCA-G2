@@ -19,7 +19,7 @@
       <h2 id="step-unlock-title">ロックを解除してください。</h2>
       <p class="note">共有するには、回答の暗号化を解除する必要があります。</p>
       <div class="actions">
-        <a id="login-here" class="demo-launch" href="{{ url_for('auth.index', next=url_for('protection_pages.family_share')) }}" hidden>ログイン・新規登録</a>
+        <a id="login-here" class="demo-launch" href="{{ url_for('auth.index', next=request.full_path if request.query_string else request.path) }}" hidden>ログイン・新規登録</a>
         <button id="unlock-here" class="sharing-unlock" type="button" data-unlock-state="locked" disabled>回答の暗号化を解除</button>
       </div>
     </section>

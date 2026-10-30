@@ -396,7 +396,9 @@ export function bindFamilyShare(root, client = {
     if (updateId) {
       const own = await client.api("/api/v1/family/shares");
       updating = own.shares.find(share => share.id === updateId) || null;
-      if (!updating || updating.status === "stopped") {
+      // 停止済みと期限切れは、受信者へ配信されないので更新の対象にしない（サーバーも409で断る）。
+      const expired = updating?.expires_at && new Date(updating.expires_at).getTime() <= Date.now();
+      if (!updating || updating.status === "stopped" || expired) {
         updating = null;
         unavailable = "更新する共有が見つかりません。停止・期限切れなどの可能性があります。家族画面から選び直してください。";
         throw new Error(unavailable);

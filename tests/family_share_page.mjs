@@ -276,8 +276,10 @@ const click = (nodes, id) => nodes[id].fire("click");
   assert.deepEqual(visibleSteps(nodes), ["done"]);
 }
 
-// --- 更新する共有が見つからない・停止済み ---
-for (const shares of [[], [{ id: "share-1", status: "stopped", connection_id: "conn-1", recipient_user_id: "user-2" }]]) {
+// --- 更新する共有が見つからない・停止済み・期限切れ ---
+for (const shares of [[], [{ id: "share-1", status: "stopped", connection_id: "conn-1", recipient_user_id: "user-2" }],
+  [{ id: "share-1", status: "active", connection_id: "conn-1", recipient_user_id: "user-2", current_version: 3,
+    expires_at: new Date(Date.now() - 60000).toISOString() }]]) {
   const { nodes, state, bind } = setup({ updateId: "share-1" });
   state.shares = shares;
   await bind();
@@ -285,5 +287,6 @@ for (const shares of [[], [{ id: "share-1", status: "stopped", connection_id: "c
   assert.equal(state.unlockCalls, 0, "更新できない共有では、解除を始めない");
   await click(nodes, "unlock-here");
   assert.equal(nodes["step-next"].disabled, true, "更新できない共有では、解除しても先へ進めない");
+  assert.equal(state.updated.length, 0);
 }
 console.log("Family share page flow passed");
