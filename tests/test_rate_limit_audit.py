@@ -80,3 +80,56 @@ def test_upgrade_adds_the_denied_count_column(app):
         assert "denied_count" in {column["name"] for column in inspect(db.engine).get_columns("rate_limit_buckets")}
         assert db.session.get(RateLimitBucket, "k").denied_count == 0
         assert apply_schema_upgrades() == []
+
+
+def test_a_zero_limit_still_logs_once_per_window(app):
+    """上限0では窓を作り直す成功がない。断る側でも期限切れの窓を作り直し、窓ごとに1行だけ残す。"""
+    with app.app_context():
+        db.create_all()
+    app.config["RATE_LIMITS"] = {**app.config["RATE_LIMITS"], "auth_options": (1, 60 * 60)}
+    client = app.test_client()
+    assert post(client, "/api/v1/auth/login/options").status_code == 200
+    assert post(client, "/api/v1/auth/login/options").status_code == 429
+    assert rate_limited_rows(app) == 1
+    with app.app_context():
+        row = db.session.query(RateLimitBucket).one()
+        row.window_started_at = utcnow() - timedelta(hours=2)
+        db.session.commit()
+    app.config["RATE_LIMITS"] = {**app.config["RATE_LIMITS"], "auth_options": (0, 60 * 60)}
+    for _ in range(5):
+        assert post(client, "/api/v1/auth/login/options").status_code == 429
+    # 新しい窓で1行だけ増える（6行にはならない）。
+    assert rate_limited_rows(app) == 2
+    assert bucket(app).denied_count == 5
+    assert bucket(app).hit_count == 0
+
+
+def test_parallel_denials_log_once(tmp_path):
+    import threading
+
+    from app import create_app
+    from config import TestingConfig
+
+    class FileConfig(TestingConfig):
+        SQLALCHEMY_DATABASE_URI = "sqlite:///" + (tmp_path / "audit.db").as_posix()
+        SQLALCHEMY_ENGINE_OPTIONS = {"connect_args": {"timeout": 15}}
+
+    app = create_app(FileConfig)
+    with app.app_context():
+        db.create_all()
+    app.config["RATE_LIMITS"] = {**app.config["RATE_LIMITS"], "auth_options": (0, 60 * 60)}
+    barrier = threading.Barrier(8)
+    codes = []
+
+    def worker():
+        barrier.wait()
+        codes.append(post(app.test_client(), "/api/v1/auth/login/options").status_code)
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(60)
+    assert codes == [429] * 8
+    assert rate_limited_rows(app) == 1
+    assert bucket(app).denied_count == 8

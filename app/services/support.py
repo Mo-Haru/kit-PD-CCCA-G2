@@ -9,7 +9,7 @@ import ipaddress
 from datetime import datetime, timedelta, timezone
 
 from flask import current_app, jsonify, request
-from sqlalchemy import select, update
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
@@ -263,24 +263,35 @@ def take_rate(scope: str, ident: str | None = None, message: str = RATE_MESSAGE)
                 .values(hit_count=table.hit_count + 1)
             ).rowcount
     if taken != 1:
-        _deny_rate(scope, key, start, message)
+        _deny_rate(scope, key, now, start, message)
 
 
-def _deny_rate(scope: str, key: str, start, message: str) -> None:
+def _deny_rate(scope: str, key: str, now, start, message: str) -> None:
     """断った回数をバケットに数え、監査ログは窓ごとに最初の1回だけ残す。
 
     断るたびに監査ログを1行足すと、上限に達した後も小さな要求を送り続けるだけでDBを増やせるため。
+    どの要求が「窓の最初の拒否」かは、断った回数を0から1へ変えた条件付きUPDATEの件数で決める
+    （数を読んで判断すると、期限切れの窓や同時の拒否で取り違える）。
     呼び出し側の途中の変更は残さない（先にロールバックしてから、数えた結果だけをコミットする）。
     """
     db.session.rollback()
-    db.session.execute(
-        update(RateLimitBucket).where(RateLimitBucket.bucket_key == key, RateLimitBucket.window_started_at > start)
-        .values(denied_count=RateLimitBucket.denied_count + 1)
-    )
-    denied = db.session.execute(
-        select(RateLimitBucket.denied_count).where(RateLimitBucket.bucket_key == key)
-    ).scalar_one_or_none()
-    if denied == 1:
+    bucket = RateLimitBucket
+    # 窓が切れていれば、この拒否を新しい窓の最初の拒否として窓を作り直す（上限0では許可で作り直されないため）。
+    first = db.session.execute(
+        update(bucket).where(bucket.bucket_key == key, bucket.window_started_at <= start)
+        .values(window_started_at=now, hit_count=0, denied_count=1)
+    ).rowcount == 1
+    if not first:
+        first = db.session.execute(
+            update(bucket).where(bucket.bucket_key == key, bucket.window_started_at > start, bucket.denied_count == 0)
+            .values(denied_count=1)
+        ).rowcount == 1
+    if not first:
+        db.session.execute(
+            update(bucket).where(bucket.bucket_key == key, bucket.window_started_at > start)
+            .values(denied_count=bucket.denied_count + 1)
+        )
+    if first:
         audit("rate_limited", "rate_limit", scope, "failure", "rate_limited")
     db.session.commit()
     raise ApiError("rate_limited", 429, message)
