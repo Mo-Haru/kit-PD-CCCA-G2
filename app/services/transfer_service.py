@@ -35,6 +35,7 @@ from app.services.support import (
 
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 TERMINAL = {"finalized", "cancelled", "expired"}
+OPEN = ("started", "bound", "source_approved", "bundled", "target_ready")
 
 
 def _fingerprint(public_key: bytes) -> str:
@@ -78,20 +79,36 @@ def _ensure_current(row: DeviceMigration) -> None:
     if row.status in TERMINAL:
         return
     if row.expires_at <= utcnow():
-        _abort(row, "expired")
+        if not _abort(row, "expired"):
+            # 同時に完了・取消された。その結果をそのまま使う。
+            db.session.commit()
+            return
         db.session.commit()
         fail("migration_expired", 410, "移行の期限が切れました。古いパスキーはそのまま使えます。",
              action="migration_expired", target_type="migration", target_id=row.id, actor_id=row.user_id)
 
 
-def _clear(row: DeviceMigration, status: str) -> None:
-    row.status = status
-    row.confirmation_code = None
-    row.target_token_hash = None
-    row.bundle_enc = None
-    row.bundle_ciphertext = None
+def _move(row: DeviceMigration, allowed: tuple[str, ...], status: str) -> bool:
+    """移行を終える状態変化を、条件付きUPDATE1回で行う。条件に合ったときだけ変わり、行を読み直す。
+
+    読んでから書くと、取消とパスキー登録・完了が同時に起きたとき、互いの結果を上書きするため。
+    PostgreSQLは行ロックと条件の再評価、SQLiteは書き込みロックで直列になる。
+    """
+    values = {
+        "status": status,
+        "confirmation_code": None,
+        "target_token_hash": None,
+        "bundle_enc": None,
+        "bundle_ciphertext": None,
+    }
     if status == "finalized":
-        row.finalized_at = utcnow()
+        values["finalized_at"] = utcnow()
+    moved = db.session.execute(
+        update(DeviceMigration).where(DeviceMigration.id == row.id, DeviceMigration.status.in_(allowed))
+        .values(**values).execution_options(synchronize_session=False)
+    ).rowcount == 1
+    db.session.refresh(row)
+    return moved
 
 
 def _revoke_target(row: DeviceMigration) -> None:
@@ -110,10 +127,27 @@ def _revoke_target(row: DeviceMigration) -> None:
     )
 
 
-def _abort(row: DeviceMigration, status: str) -> None:
-    # 取消と期限切れでは移行先だけを無効化し、移行元のパスキーは残す。
+def _advance(row: DeviceMigration, *conditions, **values) -> bool:
+    """手続きを進める状態変化も、今の状態を条件にしたUPDATE1回で行う。取り消し済みの移行を生き返らせない。"""
+    moved = db.session.execute(
+        update(DeviceMigration).where(DeviceMigration.id == row.id, *conditions)
+        .values(**values).execution_options(synchronize_session=False)
+    ).rowcount == 1
+    if moved:
+        db.session.refresh(row)
+    return moved
+
+
+def _abort(row: DeviceMigration, status: str) -> bool:
+    """取消と期限切れでは移行先だけを無効化し、移行元のパスキーは残す。終わっていた場合はFalse。
+
+    状態を先に変えてから、読み直した行の移行先パスキーを無効化する。
+    取消の直前に登録が確定していても、そのパスキーを取りこぼさない。
+    """
+    if not _move(row, OPEN, status):
+        return False
     _revoke_target(row)
-    _clear(row, status)
+    return True
 
 
 def _view(row: DeviceMigration, *, include_code: bool) -> dict:
@@ -174,19 +208,22 @@ def bind(body: dict) -> dict:
     _ensure_current(row)
     public_key = b64decode(body.get("target_public_key"), exact=32)
     if row.status == "started" and row.target_public_key is None:
-        row.target_public_key = public_key
-        row.status = "bound"
-        row.confirmation_code = _code()
         token = secrets.token_bytes(32)
-        row.target_token_hash = hashlib.sha256(token).digest()
-        audit("migration_bound", "migration", row.id, "success", actor_id=row.user_id)
-        db.session.commit()
-        return {"migration": _view(row, include_code=True), "transfer_token": b64encode(token)}
+        if _advance(row, DeviceMigration.status == "started", DeviceMigration.target_public_key.is_(None),
+                    target_public_key=public_key, status="bound", confirmation_code=_code(),
+                    target_token_hash=hashlib.sha256(token).digest()):
+            audit("migration_bound", "migration", row.id, "success", actor_id=row.user_id)
+            db.session.commit()
+            return {"migration": _view(row, include_code=True), "transfer_token": b64encode(token)}
+        db.session.rollback()
+        db.session.refresh(row)
     if row.status == "bound" and row.target_public_key is not None and hmac.compare_digest(row.target_public_key, public_key):
         token = secrets.token_bytes(32)
-        row.target_token_hash = hashlib.sha256(token).digest()
-        db.session.commit()
-        return {"migration": _view(row, include_code=True), "transfer_token": b64encode(token)}
+        if _advance(row, DeviceMigration.status == "bound", DeviceMigration.target_public_key == public_key,
+                    target_token_hash=hashlib.sha256(token).digest()):
+            db.session.commit()
+            return {"migration": _view(row, include_code=True), "transfer_token": b64encode(token)}
+        db.session.rollback()
     fail("migration_key_mismatch", 409, "移行先の公開鍵は変更できません。手続きをやり直してください。",
          action="migration_bind", target_type="migration", target_id=row.id, actor_id=row.user_id)
 
@@ -217,7 +254,12 @@ def approve(migration_id: str, body: dict) -> dict:
         isinstance(finger, str) and len(finger) == len(expected) and hmac.compare_digest(finger, expected)
     )
     if not code_ok or not finger_ok:
-        row.approve_failures += 1
+        # 誤りの回数もDB上で加算する。同時に送っても5回を超えて試せない。
+        counted = _advance(row, DeviceMigration.status == "bound", DeviceMigration.approve_failures < 5,
+                           approve_failures=DeviceMigration.approve_failures + 1)
+        if not counted:
+            db.session.rollback()
+            fail("migration_state", 409, "いま承認できる状態ではありません。", actor_id=user.id)
         if row.approve_failures >= 5:
             _abort(row, "cancelled")
             audit("migration_cancelled", "migration", row.id, "failure", "mismatch", actor_id=user.id)
@@ -227,8 +269,9 @@ def approve(migration_id: str, body: dict) -> dict:
         db.session.commit()
         fail("migration_mismatch", 403, "照合コードまたは指紋が一致しません。",
              action="migration_approve", target_type="migration", target_id=row.id, actor_id=user.id)
-    row.status = "source_approved"
-    row.source_approved_at = utcnow()
+    if not _advance(row, DeviceMigration.status == "bound", DeviceMigration.source_passkey_id == passkey.id,
+                    status="source_approved", source_approved_at=utcnow()):
+        fail("migration_state", 409, "いま承認できる状態ではありません。", actor_id=user.id)
     audit("migration_approved", "migration", row.id, "success", actor_id=user.id)
     db.session.commit()
     return {"migration": _view(row, include_code=True)}
@@ -240,9 +283,11 @@ def upload_bundle(migration_id: str, body: dict) -> dict:
     row = _owned(migration_id, user)
     if row.source_passkey_id != passkey.id or row.status != "source_approved":
         fail("migration_state", 409, "鍵束を送れる状態ではありません。", actor_id=user.id)
-    row.bundle_enc = b64decode(body.get("hpke_enc"), exact=32)
-    row.bundle_ciphertext = b64decode(body.get("ciphertext"), minimum=16, maximum=ciphertext_limit())
-    row.status = "bundled"
+    enc = b64decode(body.get("hpke_enc"), exact=32)
+    ciphertext = b64decode(body.get("ciphertext"), minimum=16, maximum=ciphertext_limit())
+    if not _advance(row, DeviceMigration.status == "source_approved", DeviceMigration.source_passkey_id == passkey.id,
+                    bundle_enc=enc, bundle_ciphertext=ciphertext, status="bundled"):
+        fail("migration_state", 409, "鍵束を送れる状態ではありません。", actor_id=user.id)
     audit("migration_bundled", "migration", row.id, "success", actor_id=user.id)
     db.session.commit()
     return {"ok": True, "status": row.status}
@@ -293,6 +338,7 @@ def finish_target_passkey(body: dict) -> dict:
     row = _by_target_token()
     if row.status != "bundled":
         fail("migration_state", 409, "パスキーを登録できる状態ではありません。")
+    token_hash = row.target_token_hash
     user = db.session.get(User, row.user_id)
     from app.services.support import consume_challenge
     challenge = consume_challenge("add_passkey", user_id=user.id)
@@ -314,11 +360,23 @@ def finish_target_passkey(body: dict) -> dict:
         crypto_version=CRYPTO_VERSION,
         **wrapped,
     ))
-    row.target_passkey_id = passkey.id
-    row.status = "target_ready"
+    db.session.flush()
+    # 検証の間に取り消された場合は、パスキーと鍵の封筒ごとロールバックし、登録しない。
+    moved = db.session.execute(
+        update(DeviceMigration).where(
+            DeviceMigration.id == row.id,
+            DeviceMigration.status == "bundled",
+            DeviceMigration.target_token_hash == token_hash,
+            DeviceMigration.expires_at > utcnow(),
+        ).values(status="target_ready", target_passkey_id=passkey.id)
+        .execution_options(synchronize_session=False)
+    ).rowcount == 1
+    if not moved:
+        fail("migration_state", 409, "移行が取り消されたか状態が変わったため、パスキーを登録しませんでした。",
+             action="migration_passkey", target_type="migration", target_id=row.id, actor_id=user.id)
     audit("migration_passkey", "passkey", passkey.id, "success", actor_id=user.id)
     db.session.commit()
-    return {"passkey_id": passkey.id, "status": row.status}
+    return {"passkey_id": passkey.id, "status": "target_ready"}
 
 
 def _target_session(migration_id: str):
@@ -358,6 +416,10 @@ def finalize(migration_id: str, body: dict) -> dict:
     source = db.session.get(PasskeyCredential, row.source_passkey_id)
     if source is None or source.revoked_at is not None or source.user_id != user.id:
         fail("migration_state", 409, "移行元のパスキーを確認できません。", actor_id=user.id)
+    # 取消と同時でも、どちらか一方だけが成立する。完了できたときだけ移行元を無効化する。
+    if not _move(row, ("target_ready",), "finalized"):
+        fail("migration_state", 409, "移行が取り消されたか状態が変わったため、完了できませんでした。古いパスキーは無効化していません。",
+             action="migration_finalize", target_type="migration", target_id=row.id, actor_id=user.id)
     now = utcnow()
     source.revoked_at = now
     db.session.execute(
@@ -366,7 +428,6 @@ def finalize(migration_id: str, body: dict) -> dict:
             AuthSession.revoked_at.is_(None),
         ).values(revoked_at=now)
     )
-    _clear(row, "finalized")
     audit("migration_finalized", "passkey", source.id, "success", actor_id=user.id)
     db.session.commit()
     return {"ok": True, "status": "finalized", "revoked_passkey_id": source.id}
@@ -396,7 +457,10 @@ def cancel(migration_id: str) -> dict:
         fail("not_found", 404, "移行手続きが見つかりません。", actor_id=None if user is None else user.id)
     if row.status in TERMINAL:
         return {"ok": True, "status": row.status}
-    _abort(row, "cancelled")
+    if not _abort(row, "cancelled"):
+        # 同時に完了・期限切れになった。終わった状態をそのまま返す。
+        db.session.commit()
+        return {"ok": True, "status": row.status}
     audit("migration_cancelled", "migration", row.id, "success", actor_id=row.user_id)
     db.session.commit()
     return {"ok": True, "status": "cancelled"}
