@@ -67,6 +67,9 @@ class BaseConfig:
     QR_VIEW_IDLE_SECONDS = 5 * 60
     MIGRATION_TTL_SECONDS = 15 * 60
     MAX_CIPHERTEXT_BYTES = 256 * 1024
+    # 要求本文の上限。Content-Lengthのない（chunked）本文も、読み込みの途中で413にする。
+    # 本番のWSGIサーバーとリバースプロキシにも、同じ以下の上限と読み込みのタイムアウトを設定すること。
+    MAX_CONTENT_LENGTH = 800_000
     MAX_SHARE_VERSIONS = 30
     RATELIMIT_ENABLED = True
     RATE_LIMITS = {

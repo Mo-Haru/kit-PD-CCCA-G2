@@ -364,6 +364,8 @@ push のあと、GitHub のリポジトリページで **Compare & pull request*
 | `testing` | `pytest` が使うインメモリ SQLite。開発用 DB ファイルは使わない |
 | `production` | 未決定。この値では起動しない |
 
+要求本文の上限は800,000バイト（`config.py` の `MAX_CONTENT_LENGTH`）です。本番のWSGIサーバーとリバースプロキシにも、同じ以下の本文上限と読み込みタイムアウトを設定してください。
+
 リバースプロキシ（nginx や Cloudflare など）の後ろで動かすときは、`.env` の `TRUSTED_PROXY_COUNT` に手前のプロキシの段数を書きます。回数制限で利用者ごとの接続元を数えるためです。直接受ける開発サーバーでは設定しません（詳しくは [森下担当の契約](docs/morishita.md) の「大量作成への対策」）。
 
 開発用 DB を別の場所にするときは、`.env` の `DATABASE_URL` に SQLAlchemy の接続文字列を書きます。空欄のままにすると、暫定の SQLite を使います。SQLite 以外へ変えても、本番 DB が決まったことにはなりません。
