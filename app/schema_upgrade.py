@@ -350,6 +350,17 @@ def _create_share_quota_locks() -> None:
     ShareQuotaLock.__table__.create(bind=db.engine, checkfirst=True)
 
 
+def _add_rate_limit_denied_count() -> None:
+    """回数制限で断った回数の列を足す。既存のバケットは0から数える。"""
+    inspector = inspect(db.engine)
+    if "rate_limit_buckets" not in inspector.get_table_names():
+        return
+    names = {column["name"] for column in inspector.get_columns("rate_limit_buckets")}
+    if "denied_count" not in names:
+        db.session.execute(text("ALTER TABLE rate_limit_buckets ADD COLUMN denied_count INTEGER NOT NULL DEFAULT 0"))
+        db.session.commit()
+
+
 STEPS = (
     ("20261015_protection_tables", _create_protection_tables),
     ("20261015_migration_decrypt_confirmed", _add_migration_decrypt_confirmed),
@@ -360,6 +371,7 @@ STEPS = (
     ("20261029_share_quota_locks", _create_share_quota_locks),
     ("20261029_long_qr", _replace_unlimited_qr_with_long),
     ("20261029_family_invite_confirmation", _add_invitation_confirmation),
+    ("20261030_rate_limit_denied_count", _add_rate_limit_denied_count),
 )
 
 

@@ -9,7 +9,7 @@ import ipaddress
 from datetime import datetime, timedelta, timezone
 
 from flask import current_app, jsonify, request
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
@@ -254,7 +254,7 @@ def take_rate(scope: str, ident: str | None = None, message: str = RATE_MESSAGE)
         # 窓が切れていれば、この要求を1回目として窓を作り直す。同時に来ても条件に合うのは1件だけ。
         taken = db.session.execute(
             update(table).where(table.bucket_key == key, table.window_started_at <= start)
-            .values(window_started_at=now, hit_count=1)
+            .values(window_started_at=now, hit_count=1, denied_count=0)
         ).rowcount
         if not taken:
             taken = db.session.execute(
@@ -263,8 +263,27 @@ def take_rate(scope: str, ident: str | None = None, message: str = RATE_MESSAGE)
                 .values(hit_count=table.hit_count + 1)
             ).rowcount
     if taken != 1:
-        fail("rate_limited", 429, message,
-             action="rate_limited", target_type="rate_limit", target_id=scope)
+        _deny_rate(scope, key, start, message)
+
+
+def _deny_rate(scope: str, key: str, start, message: str) -> None:
+    """断った回数をバケットに数え、監査ログは窓ごとに最初の1回だけ残す。
+
+    断るたびに監査ログを1行足すと、上限に達した後も小さな要求を送り続けるだけでDBを増やせるため。
+    呼び出し側の途中の変更は残さない（先にロールバックしてから、数えた結果だけをコミットする）。
+    """
+    db.session.rollback()
+    db.session.execute(
+        update(RateLimitBucket).where(RateLimitBucket.bucket_key == key, RateLimitBucket.window_started_at > start)
+        .values(denied_count=RateLimitBucket.denied_count + 1)
+    )
+    denied = db.session.execute(
+        select(RateLimitBucket.denied_count).where(RateLimitBucket.bucket_key == key)
+    ).scalar_one_or_none()
+    if denied == 1:
+        audit("rate_limited", "rate_limit", scope, "failure", "rate_limited")
+    db.session.commit()
+    raise ApiError("rate_limited", 429, message)
 
 
 def enforce_rate(scope: str, ident: str | None = None, message: str = RATE_MESSAGE) -> None:
