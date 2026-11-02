@@ -237,6 +237,11 @@ def qr_start(share_id):
     return finish(qr_service.start_view(share_id, json_body()))
 
 
+@bp.post("/api/v1/qr-shares/<share_id>/cancel")
+def qr_cancel(share_id):
+    return _ok(qr_service.cancel_view(share_id, json_body()))
+
+
 @bp.get("/api/v1/qr-view/current")
 def qr_current():
     return _ok(qr_service.current_view())

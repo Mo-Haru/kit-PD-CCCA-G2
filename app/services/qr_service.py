@@ -368,6 +368,65 @@ def start_view(share_id: str, body: dict) -> ActionResult:
     return ActionResult(_start_body(session_row), qr_token=raw)
 
 
+def cancel_view(share_id: str, body: dict) -> dict:
+    """閲覧の試行を取り消す。ページが閉じられても、遅れて届く開始でセッションを残さない。
+
+    QRを持つ人だけが知る開始トークンと、ページが作った試行IDで確かめる（ログインもCookieも要らない）。
+    その試行のセッションがあれば失効させる。まだ無ければ、失効済みの記録を先に置き、
+    後から届いた同じ試行の開始を断る（緊急用QRも消費しない）。応答は、取り消す対象の有無で変えない。
+    """
+    from app.services.support import enforce_rate
+    enforce_rate("qr_start")
+    expect_fields(body, {"start_token", "attempt_id"})
+    share_key = share_id if isinstance(share_id, str) else ""
+    if SHARE_ID.fullmatch(share_key or "") is None:
+        fail("qr_denied", 403, "このQRでは閲覧を開始できません。", action="qr_cancel", target_type="qr_share")
+    try:
+        token = b64decode(body.get("start_token"), exact=32)
+        attempt = b64decode(body.get("attempt_id"), minimum=16, maximum=64)
+    except Exception:
+        fail("qr_denied", 403, "このQRでは閲覧を開始できません。", action="qr_cancel", target_type="qr_share")
+    share = db.session.get(QrShare, share_key)
+    if share is None or not hmac.compare_digest(share.start_token_hash, hashlib.sha256(token).digest()):
+        fail("qr_denied", 403, "このQRでは閲覧を開始できません。", action="qr_cancel", target_type="qr_share")
+    attempt_hash = hashlib.sha256(attempt).digest()
+    now = utcnow()
+
+    def revoke_existing() -> bool:
+        return db.session.execute(
+            update(QrViewSession).where(
+                QrViewSession.qr_share_id == share.id,
+                QrViewSession.attempt_hash == attempt_hash,
+                QrViewSession.revoked_at.is_(None),
+            ).values(revoked_at=now)
+        ).rowcount == 1
+
+    if not revoke_existing():
+        existing = db.session.query(QrViewSession).filter_by(
+            qr_share_id=share.id, attempt_hash=attempt_hash,
+        ).one_or_none()
+        if existing is None:
+            # 開始より先に届いた取り消し。同じ試行の開始が後から来ても、失効済みとして断られる。
+            db.session.add(QrViewSession(
+                qr_share_id=share.id,
+                token_hash=hashlib.sha256(secrets.token_bytes(32)).digest(),
+                attempt_hash=attempt_hash,
+                issued_at=now,
+                absolute_expires_at=now + timedelta(seconds=1),
+                idle_expires_at=now + timedelta(seconds=1),
+                revoked_at=now,
+            ))
+            try:
+                db.session.flush()
+            except IntegrityError:
+                # 同時に開始がセッションを作った。そのセッションを失効させる。
+                db.session.rollback()
+                revoke_existing()
+    audit("qr_cancelled", "qr_share", share.id, "success")
+    db.session.commit()
+    return {"ok": True}
+
+
 def _start_body(session_row: QrViewSession) -> dict:
     return {
         "session_id": session_row.id,
