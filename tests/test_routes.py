@@ -66,7 +66,7 @@ def test_auth_page_is_standalone(client):
 
 
 def test_common_pages_have_session_header(client):
-    for path in ("/", "/answers", "/sharing", "/family", "/family/invite", "/transfer", "/view/layout-check"):
+    for path in ("/", "/answers", "/sharing", "/family", "/family/share", "/family/invite", "/transfer", "/view/layout-check"):
         response = client.get(path)
         body = response.get_data(as_text=True)
         assert response.status_code == 200
@@ -170,11 +170,43 @@ def test_family_has_dedicated_invitation_and_shared_answer_dialog(client):
 
     markup = StrictMarkup(client.get("/family").get_data(as_text=True))
     assert not any(element.attrs.get("id") == "login-here" for element in markup.elements)
-    assert markup.one_id("unlock-here").attrs["data-unlock-state"] == "locked"
+    # 家族の画面に「回答の暗号化を解除」のボタンはない。回答を開くときに、その場で本人確認をする。
+    for removed in ("unlock-here", "invite-unlock"):
+        assert not any(element.attrs.get("id") == removed for element in markup.elements)
+    assert "hidden" in markup.one_id("family-detail-unlock").attrs
+    assert "パスキーで本人確認して表示" in client.get("/family").get_data(as_text=True)
     assert markup.one_id("family-detail").tag == "dialog"
-    for button in ("family-stop-top", "family-stop-bottom"):
-        assert "button-danger" in markup.one_id(button).attrs["class"].split()
+    # 配信停止と閉じるは、右上に並べる。下部のボタンはない。
+    assert "button-danger" in markup.one_id("family-stop").attrs["class"].split()
+    actions = markup.one_id("family-stop").ancestors[-1]
+    assert actions is markup.one_id("family-close").ancestors[-1]
+    assert markup.one_id("family-detail-title").ancestors[-1] is actions.ancestors[-1], "title and buttons share the header row"
+    for removed in ("family-stop-bottom", "family-close-bottom", "family-stop-top", "family-close-top"):
+        assert not any(element.attrs.get("id") == removed for element in markup.elements)
+    detail = markup.one_id("family-detail")
+    assert not any(detail in element.ancestors and "share-dialog-footer" in (element.attrs.get("class") or "").split()
+                   for element in markup.elements)
     markup.one_id("invite-qr")
+    # 共有の作成は別の画面。一覧の画面には、開始のボタンだけを置く。
+    assert markup.one_id("share-start").tag == "button"
+    for form_id in ("show-preview", "share", "confirm-share", "expires-at", "connection"):
+        assert not any(element.attrs.get("id") == form_id for element in markup.elements)
+    # ダッシュボード：上に4つの数、下にカード（家族・招待・共有したもの・共有されたもの）。
+    for stat in ("stat-family", "stat-sharing", "stat-received", "stat-attention"):
+        markup.one_id(stat)
+    assert markup.one_id("stat-attention-tile").attrs["data-attention"] == "false"
+    # 家族のカードは2枚分の幅で、右上に「編集」「家族の招待」。招待のカードはない。
+    wide = markup.one_id("connections").ancestors[-1]
+    assert "dash-card-wide" in wide.attrs["class"].split()
+    for button_id in ("family-edit", "invite-start"):
+        assert wide in markup.one_id(button_id).ancestors
+    assert markup.one_id("invite-dialog").tag == "dialog"
+    assert wide not in markup.one_id("invite-open").ancestors
+    assert not any(element.attrs.get("aria-labelledby") == "dash-invite-title" for element in markup.elements)
+    for list_id in ("connections", "incoming", "shares", "received"):
+        assert any("dash-card" in (ancestor.attrs.get("class") or "").split() for ancestor in markup.one_id(list_id).ancestors)
+    markup.one_id("shares")
+    markup.one_id("received")
     invite = StrictMarkup(client.get("/family/invite").get_data(as_text=True))
     invite.module_script("/static/js/watashi/family-invitation.mjs")
     assert "disabled" in invite.one_id("accept-invitation").attrs
@@ -232,3 +264,58 @@ def test_init_db_command_is_registered(app):
     result = app.test_cli_runner().invoke(args=["--help"])
     assert result.exit_code == 0
     assert "init-db" in result.output
+
+
+def test_family_share_page_is_a_stepwise_flow(client):
+    from tests.test_menu import StrictMarkup
+
+    response = client.get("/family/share")
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "no-store"
+    markup = StrictMarkup(response.get_data(as_text=True))
+    markup.module_script("/static/js/watashi/family-share.mjs")
+    order = ["step-unlock", "step-select", "step-target", "step-confirm", "step-done"]
+    positions = [markup.elements.index(markup.one_id(step)) for step in order]
+    assert positions == sorted(positions)
+    for step in order[1:]:
+        assert "hidden" in markup.one_id(step).attrs
+    assert "hidden" not in markup.one_id("step-unlock").attrs
+    for control in ("unlock-here", "step-next", "share", "confirm-share"):
+        assert "disabled" in markup.one_id(control).attrs
+    assert markup.one_id("back-to-family").attrs["href"] == "/family"
+
+    # 戻るリンクは、見出しと同じ行（右上）にある。
+    heading = markup.one_id("share-title").ancestors[-1]
+    assert heading in markup.one_id("back-to-family").ancestors and "share-heading" in heading.attrs["class"].split()
+    markup.one_id("expires-unlimited")
+    scope_radios = [element for element in markup.elements
+                    if element.tag == "input" and element.attrs.get("name") == "scope"]
+    assert len(scope_radios) == 3 and not any("checked" in radio.attrs for radio in scope_radios), "範囲は最初は未選択"
+    body = response.get_data(as_text=True)
+    for title in ("ロックを解除してください。", "共有範囲を選択してください。", "誰にいつまで共有しますか？",
+                  "共有するには、回答の暗号化を解除する必要があります。"):
+        assert title in body
+
+
+def test_family_share_login_keeps_the_share_being_updated(client):
+    from urllib.parse import parse_qs, urlsplit
+
+    from tests.test_menu import StrictMarkup
+
+    markup = StrictMarkup(client.get("/family/share?update=share-1").get_data(as_text=True))
+    login = urlsplit(markup.one_id("login-here").attrs["href"])
+    assert login.path == "/auth"
+    # ログインから戻ったとき、新規作成ではなく同じ共有の更新に戻る。
+    assert parse_qs(login.query)["next"] == ["/family/share?update=share-1"]
+    plain = StrictMarkup(client.get("/family/share").get_data(as_text=True))
+    assert parse_qs(urlsplit(plain.one_id("login-here").attrs["href"]).query)["next"] == ["/family/share"]
+    # 戻り先の検証でも、更新の指定（クエリ）は保たれる。
+    page = client.get("/auth?next=" + "/family/share%3Fupdate%3Dshare-1")
+    assert 'data-return-url="/family/share?update=share-1"' in page.get_data(as_text=True)
+
+def test_family_share_page_flow():
+    result = subprocess.run(
+        ["node", "tests/family_share_page.mjs"], cwd=Path(__file__).resolve().parents[1],
+        capture_output=True, text=True, timeout=20, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

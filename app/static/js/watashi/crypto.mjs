@@ -263,12 +263,30 @@ export function entriesFromPayload(payload, catalog) {
   }));
 }
 
+// 回答の表示。質問ごとに1つの枠（質問・回答）にして、見分けやすくする。
+// 質問の文と回答は、文字としてだけ入れる（HTMLとして解釈させない）。
 export function fillAnswerList(parent, entries) {
+  const doc = parent.ownerDocument;
   parent.replaceChildren();
   for (const entry of entries) {
-    const row = parent.ownerDocument.createElement("p");
-    row.textContent = `${entry.label}：${entry.stateLabel}／${entry.valueText}`;
-    parent.append(row);
+    const answered = entry.stateLabel === "回答";
+    const card = doc.createElement("section");
+    card.className = `answer-item ${answered ? "answer-item--answered" : "answer-item--empty"}`;
+    const question = doc.createElement("h3");
+    question.className = "answer-item-question";
+    question.textContent = entry.label;
+    card.append(question);
+    const value = doc.createElement("p");
+    if (answered) {
+      value.className = "answer-item-value";
+      value.textContent = entry.valueText || "（空欄）";
+    } else {
+      // 未回答・未定・回答しない：回答の代わりに、状態を札で示す。
+      value.className = "answer-item-state";
+      value.textContent = entry.stateLabel;
+    }
+    card.append(value);
+    parent.append(card);
   }
 }
 

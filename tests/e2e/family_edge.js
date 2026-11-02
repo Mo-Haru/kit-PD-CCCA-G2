@@ -39,19 +39,24 @@ async function person(browser, name) {
   return { name, context, page, posts };
 }
 
+// 家族画面（ダッシュボード）を開く。本人確認（パスキー）は、回答を開くときと招待を作るときにだけ行われる。
 async function openFamily(user) {
   await user.page.goto(`${BASE}/family`);
-  await user.page.waitForFunction(() => !document.querySelector("#unlock-here").disabled
-    || document.querySelector("#unlock-here").dataset.unlockState === "unlocked");
-  if (await user.page.locator("#unlock-here").getAttribute("data-unlock-state") !== "unlocked") {
-    await user.page.click("#unlock-here");
-    await user.page.waitForFunction(() => document.querySelector("#unlock-here").dataset.unlockState === "unlocked", null, { timeout: 15000 });
-  }
-  await user.page.waitForTimeout(300);
+  await user.page.waitForFunction(() => !document.querySelector("#invite-start").disabled);
+  await user.page.waitForLoadState("networkidle");
+}
+
+// 画面のボタンを通さずに暗号関数を使うときだけ、画面と同じ client.mjs で解除する。
+async function unlockInPage(page) {
+  await page.evaluate(async () => {
+    const client = await import("/static/js/watashi/client.mjs");
+    if (!client.getUnlockState().unlocked) await client.unlock();
+  });
 }
 
 async function saveAnswers(user) {
   await openFamily(user);
+  await unlockInPage(user.page);
   await user.page.evaluate(async () => {
     const client = await import("/static/js/watashi/client.mjs");
     const catalog = await client.api("/api/v1/answers/questions");
@@ -65,6 +70,7 @@ async function statusText(page) { return (await page.locator("#status").textCont
 
 async function connect(sender, recipient) {
   await openFamily(sender);
+  await sender.page.click("#invite-start");
   await sender.page.click("#invite-open");
   await sender.page.waitForFunction(() => document.querySelector("#invite-link").textContent.includes("#token="));
   const link = await sender.page.locator("#invite-link").textContent();
@@ -86,14 +92,45 @@ async function chooseRecipient(page, name) {
   await page.selectOption("#connection", value);
 }
 
+// 共有の画面（/family/share）を開く。開くと自動で解除し、共有範囲の選択へ進む。
+async function openShare(user, updateId = null) {
+  await user.page.goto(`${BASE}/family/share${updateId ? `?update=${encodeURIComponent(updateId)}` : ""}`);
+  await user.page.waitForFunction(() => !document.querySelector("#step-select").hidden
+    || document.querySelector("#status").classList.contains("is-error"), null, { timeout: 15000 });
+}
+
+async function next(page, step) {
+  await page.waitForFunction(() => !document.querySelector("#step-next").disabled);
+  await page.click("#step-next");
+  await page.waitForFunction(id => !document.querySelector(`#step-${id}`).hidden, step, { timeout: 10000 });
+}
+
+// 範囲（全体）→ 家族と期限 → 再確認 まで進めて、確認のチェックを入れる。更新では「家族と期限」を省く。
 async function preview(page, recipientName, expiresLocal = "") {
   await page.check("input[name=scope][value=all]");
-  await chooseRecipient(page, recipientName);
-  await page.fill("#expires-at", expiresLocal);
-  await page.waitForFunction(() => !document.querySelector("#show-preview").disabled);
-  await page.click("#show-preview");
+  if (recipientName === null) {
+    await next(page, "confirm");
+  } else {
+    await next(page, "target");
+    await chooseRecipient(page, recipientName);
+    if (expiresLocal) await page.fill("#expires-at", expiresLocal);
+    else await page.click("#expires-unlimited");
+    await next(page, "confirm");
+  }
   await page.waitForFunction(() => !document.querySelector("#confirm-share").disabled);
   await page.check("#confirm-share");
+}
+
+async function shareFresh(user, recipientName, expiresLocal = "") {
+  await openShare(user);
+  await preview(user.page, recipientName, expiresLocal);
+}
+
+async function shareButtonUsable(page) {
+  return page.evaluate(() => {
+    const share = document.querySelector("#share");
+    return !share.hidden && !share.disabled;
+  });
 }
 
 function sharePosts(user) { return user.posts.filter(path => path === "/api/v1/family/shares" || path.endsWith("/update")).length; }
@@ -101,6 +138,7 @@ function sharePosts(user) { return user.posts.filter(path => path === "/api/v1/f
 async function rotateReceiveKey(user) {
   // 受信用鍵を更新する画面はないため、画面と同じ暗号関数でAPIを呼ぶ（鍵束は保管用鍵で暗号化して保存）。
   await openFamily(user);
+  await unlockInPage(user.page);
   return user.page.evaluate(async () => {
     const client = await import("/static/js/watashi/client.mjs");
     const crypto = await import("/static/js/watashi/crypto.mjs");
@@ -143,13 +181,14 @@ async function cards(page, list) {
 
   // ── 1. 確認後の相手・期限・鍵の変更 ──
   const S1 = "1 確認後の変更";
-  await openFamily(A);
   let before = sharePosts(A);
-  await preview(A.page, "家族B");
+  await shareFresh(A, "家族B");
+  await A.page.click("#step-back");
   await chooseRecipient(A.page, "家族C");
-  record(S1, "確認後に相手を変える（画面操作）→ 確認が外れ、共有ボタンが押せない",
-    !(await A.page.isChecked("#confirm-share")) && await A.page.isDisabled("#share"));
-  await preview(A.page, "家族B");
+  record(S1, "確認後に戻って相手を変える（画面操作）→ 確認が外れ、共有ボタンが押せない",
+    !(await A.page.isChecked("#confirm-share")) && !(await shareButtonUsable(A.page))
+      && !(await A.page.locator("#preview-output").textContent()));
+  await shareFresh(A, "家族B");
   // 画面のイベントを通さず値だけ変わった場合（別タブの自動入力など）も、送信前の照合で止まるか。
   const cValue = await A.page.locator("#connection option", { hasText: "家族C" }).getAttribute("value");
   await A.page.evaluate(value => { document.querySelector("#connection").value = value; }, cValue);
@@ -157,17 +196,19 @@ async function cards(page, list) {
   await A.page.waitForTimeout(800);
   record(S1, "確認後に相手の値だけ書き換わる → 送信しない", sharePosts(A) === before, await statusText(A.page));
 
-  await preview(A.page, "家族B");
+  await shareFresh(A, "家族B");
+  await A.page.click("#step-back");
   await A.page.fill("#expires-at", localInMinutes(60 * 24));
-  record(S1, "確認後に期限を変える（画面操作）→ 確認が外れ、共有ボタンが押せない",
-    !(await A.page.isChecked("#confirm-share")) && await A.page.isDisabled("#share"));
-  await preview(A.page, "家族B");
+  record(S1, "確認後に戻って期限を変える（画面操作）→ 確認が外れ、共有ボタンが押せない",
+    !(await A.page.isChecked("#confirm-share")) && !(await shareButtonUsable(A.page))
+      && !(await A.page.locator("#preview-output").textContent()));
+  await shareFresh(A, "家族B");
   await A.page.evaluate(value => { document.querySelector("#expires-at").value = value; }, localInMinutes(60 * 48));
   await A.page.click("#share");
   await A.page.waitForTimeout(800);
   record(S1, "確認後に期限の値だけ書き換わる → 送信しない", sharePosts(A) === before, await statusText(A.page));
 
-  await preview(A.page, "家族B");
+  await shareFresh(A, "家族B");
   const rotated = await rotateReceiveKey(B);
   await A.page.click("#share");
   await A.page.waitForTimeout(1000);
@@ -188,14 +229,13 @@ async function cards(page, list) {
 
   // ── 3. 鍵更新後の再共有 ──（先に有効な共有を作り、その後で相手が鍵を更新する）
   const S3 = "3 鍵更新後の再共有";
-  await openFamily(A);
-  await preview(A.page, "家族B");
+  await shareFresh(A, "家族B");
   await A.page.click("#share");
   await A.page.waitForFunction(() => document.querySelector("#status").textContent.includes("共有しました"));
   await openFamily(B);
   let received = await cards(B.page, "received");
   record(S3, "共有直後、Bは受け取った共有を開ける（有効）", received.some(card => card.state === "active"), JSON.stringify(received));
-  await rotateReceiveKey(B);
+  const rotated2 = await rotateReceiveKey(B);
   await openFamily(A);
   const ownAfterRotate = await cards(A.page, "shares");
   record(S3, "Bの鍵更新後、Aの共有は「再共有が必要」", ownAfterRotate.some(card => card.state === "key_pending"), JSON.stringify(ownAfterRotate));
@@ -207,21 +247,25 @@ async function cards(page, list) {
   const pendingDetail = (await B.page.locator("#family-detail").textContent()) || "";
   record(S3, "Bが開いても内容は出ない（暗号文を受け取らない）", !pendingDetail.includes("ダミー回答"),
     (await B.page.locator("#family-detail-status").textContent()) || "");
-  await B.page.click("#family-close-top");
-  // Aが現在の鍵で確認し直して更新する。
+  await B.page.click("#family-close");
+  // Aが共有の詳細から「内容を選び直して更新」を開き、現在の鍵で確認し直して更新する。
   await openFamily(A);
-  await preview(A.page, "家族B");
   await A.page.locator("#shares button.sharing-issued-card[data-share-state=key_pending]").first().click();
   await A.page.waitForSelector("#family-detail[open]");
   await A.page.waitForFunction(() => document.querySelector("#family-detail-body").textContent.includes("版"), null, { timeout: 10000 })
     .catch(() => {});
   const detailText = (await A.page.locator("#family-detail-body").textContent()) || "";
   record(S3, "Aの詳細に「確認した現在の鍵で更新してください」と出る", detailText.includes("確認した現在の鍵で更新"));
-  await A.page.getByRole("button", { name: "この範囲で更新" }).click();
+  await A.page.getByRole("button", { name: "内容を選び直して更新" }).click();
+  await A.page.waitForURL(/\/family\/share\?update=/);
+  await A.page.waitForFunction(() => !document.querySelector("#step-select").hidden, null, { timeout: 15000 });
+  await preview(A.page, null);
+  const updateFacts = (await A.page.locator("#preview-output").textContent()) || "";
+  record(S3, "更新の再確認に、Bの新しい鍵が出る", updateFacts.includes(rotated2.fresh), updateFacts.slice(0, 120));
+  await A.page.click("#share");
   await A.page.waitForFunction(() => document.querySelector("#status").textContent.includes("更新しました"), null, { timeout: 10000 })
     .catch(() => {});
   record(S3, "Aが現在の鍵で更新できる", (await statusText(A.page)).includes("更新しました"), await statusText(A.page));
-  await A.page.keyboard.press("Escape");
   await openFamily(B);
   received = await cards(B.page, "received");
   await B.page.locator("#received button.sharing-issued-card[data-share-state=active]").first().click();
@@ -229,7 +273,7 @@ async function cards(page, list) {
     .catch(() => {});
   record(S3, "Bが新しい鍵で復号して内容を見られる", ((await B.page.locator("#family-detail-body").textContent()) || "").includes("ダミー回答"));
   await B.page.screenshot({ path: `${OUT}/3-reshared.png`, fullPage: true });
-  await B.page.click("#family-close-top");
+  await B.page.click("#family-close");
 
   // ── 4. 通信が遅いときの閲覧終了 ──
   const S4 = "4 通信が遅いときの閲覧終了";
@@ -238,7 +282,7 @@ async function cards(page, list) {
   await B.page.route("**/api/v1/family/received/*", async route => { await new Promise(r => setTimeout(r, 2500)); await route.continue(); });
   await B.page.locator("#received button.sharing-issued-card[data-share-state=active]").first().click();
   await B.page.waitForTimeout(300);
-  await B.page.click("#family-close-top");
+  await B.page.click("#family-close");
   await B.page.waitForTimeout(3500);
   const lateBody = (await B.page.locator("#family-detail-body").textContent()) || "";
   record(S4, "家族共有：読み込み中に閉じると、遅れて届いた回答を表示しない",
@@ -284,9 +328,8 @@ async function cards(page, list) {
 
   // ── 2. 期限切れ ──（期限を2分後にした共有を作り、期限を過ぎるまで実際に待つ）
   const S2 = "2 期限切れ";
-  await openFamily(A);
   const expiresLocal = localInMinutes(2);
-  await preview(A.page, "家族C", expiresLocal);
+  await shareFresh(A, "家族C", expiresLocal);
   await A.page.click("#share");
   await A.page.waitForFunction(() => document.querySelector("#status").textContent.includes("共有しました"));
   await openFamily(C);
@@ -306,12 +349,39 @@ async function cards(page, list) {
   await openFamily(A);
   const aShares = await cards(A.page, "shares");
   record(S2, "Aの一覧で「期限切れ」と表示される", aShares.some(card => card.state === "expired"), JSON.stringify(aShares.map(card => card.state)));
+  await A.page.locator("#shares button.sharing-issued-card[data-share-state=expired]").first().click();
+  await A.page.waitForSelector("#family-detail[open]");
+  await A.page.waitForTimeout(800);
+  record(S2, "期限切れの共有の詳細に「内容を選び直して更新」が出ない",
+    await A.page.getByRole("button", { name: "内容を選び直して更新" }).count() === 0);
   await A.page.screenshot({ path: `${OUT}/2-expired-sender.png`, fullPage: true });
+  const expiredShareId = await A.page.evaluate(async () => (await (await fetch("/api/v1/family/shares")).json())
+    .shares.find(share => share.recipient_display_name === "家族C").id);
+  const beforeExpiredUpdate = sharePosts(A);
+  await openShare(A, expiredShareId);
+  record(S2, "期限切れの共有を更新の画面で直接開いても、更新へ進めない",
+    await A.page.isDisabled("#step-next") && (await statusText(A.page)).includes("期限切れ"), await statusText(A.page));
+  const expiredRefusal = await A.page.evaluate(async id => {
+    const client = await import("/static/js/watashi/client.mjs");
+    const own = (await client.api("/api/v1/family/shares")).shares.find(share => share.id === id);
+    const key = (await client.api(`/api/v1/encryption-keys/${own.recipient_user_id}`)).keys.find(item => item.status === "active");
+    const catalog = await client.api("/api/v1/answers/questions");
+    const items = { [catalog.questions[0].id]: { state: "answered", value: "期限切れの共有への更新" } };
+    if (!client.getUnlockState().unlocked) await client.unlock();
+    try {
+      await client.updateFamilyShare({ shareId: id, expectedVersion: own.current_version, recipientUserId: own.recipient_user_id,
+        recipientKeyId: key.id, selection: { scope: "all" }, payload: { schema: 1, items } });
+      return "accepted";
+    } catch (error) { return error.code || error.message; }
+  }, expiredShareId);
+  record(S2, "画面を通さず期限切れの共有を更新しようとしても、サーバーが断る（share_expired）",
+    expiredRefusal === "share_expired" && sharePosts(A) === beforeExpiredUpdate + 1, expiredRefusal);
 
   // ── 5. 招待リンクの切り替え ──
   const S5 = "5 招待リンクの切り替え";
   const D = await person(browser, "申請者D");
   await openFamily(A);
+  await A.page.click("#invite-start");
   await A.page.click("#invite-open");
   await A.page.waitForFunction(() => document.querySelector("#invite-link").textContent.includes("#token="));
   const link1 = await A.page.locator("#invite-link").textContent();

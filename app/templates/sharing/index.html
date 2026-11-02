@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}共有 | 意思の記録{% endblock %}
+{% block page_title %}共有{% endblock %}
 {% block extra_head %}
   <link rel="stylesheet" href="{{ url_for('static', filename='css/morishita.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/answers.css') }}">
@@ -47,7 +47,8 @@
         <label class="md-field-label" for="expires-at">有効期限</label>
         <input id="expires-at" class="md-field-control" type="datetime-local" disabled>
       </div>
-      <button id="show-preview" type="button" disabled>共有する内容を確認</button>
+      <button id="show-preview" type="button" aria-describedby="preview-help" disabled>共有する内容を確認</button>
+      <p id="preview-help" class="note" role="status" aria-live="polite" hidden></p>
       <div id="preview-output" class="review-output"></div>
       <label class="confirmation"><input id="confirm-share" type="checkbox" disabled> 表示された内容と期限で共有リンクを作成します</label>
       <button id="create-qr" class="button-primary" type="button" disabled>共有リンクを作る</button>

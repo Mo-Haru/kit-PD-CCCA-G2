@@ -152,7 +152,7 @@ pytest は Node.js も使います。`tests/browser_crypto.mjs` と `tests/page_
 | http://localhost:5000/answers/demo | ダミー質問6問。パスキーで解錠し、暗号化保存・再読み込み・共有を試せる |
 | http://localhost:5000/sharing | 共有範囲を確認してリンクとQRコードを作成・停止できる |
 | http://localhost:5000/auth | パスキーの登録、ログイン、鍵の解除ができる |
-| http://localhost:5000/family | この画面でログインし、鍵を解除してから家族共有を作れる |
+| http://localhost:5000/family | 家族の一覧と、共有したもの・共有されたものを見られる。「共有を開始」から `/family/share` へ進み、鍵の解除 → 内容 → 家族と期限 → 再確認 → 確定の順で共有を作れる |
 | http://localhost:5000/transfer | この画面でログインし、鍵を解除してから端末移行を進められる |
 | http://localhost:5000/health | JSON で `status` と `database` がどちらも `ok` |
 
@@ -162,7 +162,7 @@ pytest は Node.js も使います。`tests/browser_crypto.mjs` と `tests/page_
 
 画面でログインし、その画面で鍵を解除してから、サンプル入力 → 回答確認 → 「暗号化してDBに保存」を押します。保存APIへは暗号文だけを送り、テスト質問以外の既存回答は保持します。再読み込み後も鍵を解除すれば保存内容を表示できます。共有画面では質問・章・全体の範囲を確認し、緊急用・期限付き（最長31日）・長期（最長3年）のリンクを作れます。家族共有は `/family` を使います。手順と検証範囲は [回答・共有のテスト手順](docs/answer-demo.md) にあります。
 
-画面上部には、回答の入力画面が未実装であり、パスキー、家族共有、QRの作成と閲覧、端末移行は使える旨が出ます。未実装のボタンは押せません。
+画面上部のお知らせの帯は、お知らせを持つ画面（`/answers/demo` など）にだけ出ます。未実装のボタンは押せません。
 
 ポート 5000 が使用中のときは、次でポートを変え、`.env` の `WEBAUTHN_ORIGIN` を `http://localhost:5001` にします。
 

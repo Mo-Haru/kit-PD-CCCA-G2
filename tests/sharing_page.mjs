@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { bindSharingPage } from "../app/static/js/watashi/sharing.mjs";
+import { bindSharingPage, expiryBounds } from "../app/static/js/watashi/sharing.mjs";
 
 class Element {
   children = [];
@@ -36,7 +36,7 @@ const ids = ["sharing-page", "share-fields", "status", "unlock-here", "refresh-s
   "sharing-unlock-help", "encrypted-answers", "answer-ciphertext", "all-answers", "share-detail",
   "share-stop-top", "share-stop-bottom", "share-close-top", "share-close-bottom", "share-detail-status",
   "share-detail-facts", "share-detail-unlock", "share-detail-cipher", "share-detail-answers", "long-warning",
-  "qr-image"];
+  "qr-image", "preview-help"];
 const nodes = Object.fromEntries(ids.map(id => [id, new Element()]));
 const scope = { value: "questions" }, mode = { value: "emergency" };
 const root = {
@@ -145,16 +145,22 @@ assert.equal(nodes["create-qr"].disabled, true);
 choices[0].checked = false;
 await nodes["share-fields"].fire("change", { target: choices[0] });
 assert.equal(nodes["show-preview"].disabled, true);
+assert.equal(nodes["preview-help"].hidden, false);
+assert.ok(nodes["preview-help"].textContent.includes("質問を1つ以上"));
 await nodes["show-preview"].fire("click");
 assert.equal(nodes["confirm-share"].disabled, true);
 assert.equal(created.length, 0);
 choices[0].checked = true;
 await nodes["share-fields"].fire("change", { target: choices[0] });
 assert.equal(nodes["show-preview"].disabled, false);
+assert.equal(nodes["preview-help"].hidden, true);
 await nodes["show-preview"].fire("click");
 const previewAnswers = nodes["preview-output"].children[1].children;
 assert.equal(previewAnswers.length, 1);
-assert.ok(previewAnswers[0].textContent.includes("<img src=x onerror=alert(1)>"));
+assert.ok(text(previewAnswers[0]).includes("<img src=x onerror=alert(1)>"));
+// 質問ごとに、1つの枠（質問の文と回答）で表示する。
+assert.ok(text(previewAnswers[0]).includes("質問1"));
+assert.ok(previewAnswers[0].className.includes("answer-item"));
 // Expiry/mode changes invalidate confirmation, including when changed programmatically.
 nodes["confirm-share"].checked = true;
 nodes["share-fields"].fire("change", { target: nodes["confirm-share"] });
@@ -168,6 +174,14 @@ assert.equal(nodes["confirm-share"].checked, false);
 nodes["expires-at"].value = new Date(Date.now() - 3600000).toISOString();
 await nodes["expires-at"].fire("input");
 assert.equal(nodes["show-preview"].disabled, true);
+assert.ok(nodes["preview-help"].textContent.includes("31日以内"));
+// 日付だけ入れて時刻が空のときは、value が空になり、理由を表示する。
+nodes["expires-at"].value = "";
+nodes["expires-at"].validity = { badInput: true };
+await nodes["expires-at"].fire("input");
+assert.equal(nodes["show-preview"].disabled, true);
+assert.ok(nodes["preview-help"].textContent.includes("日付と時刻"));
+delete nodes["expires-at"].validity;
 nodes["expires-at"].value = new Date(Date.now() + 3600000).toISOString();
 await nodes["expires-at"].fire("input");
 assert.equal(nodes["show-preview"].disabled, false);
@@ -224,10 +238,15 @@ assert.equal(nodes["share-detail-answers"].children.length, 0);
 assert.equal(opener.focused, true);
 // Long links show a strong warning, default to three years, and never go past it.
 assert.equal(nodes["long-warning"].hidden, true);
+// 期限が空のまま長期へ切り替えても、既定の期限ですぐに内容を確認できる。
+nodes["expires-at"].value = "";
 mode.value = "long";
 nodes["share-fields"].fire("change", { target: mode });
 assert.equal(nodes["long-warning"].hidden, false);
 assert.equal(nodes["expiry-field"].hidden, false);
+assert.equal(nodes["show-preview"].disabled, false);
+assert.equal(nodes["preview-help"].hidden, true);
+assert.ok(nodes["expires-at"].value >= nodes["expires-at"].min && nodes["expires-at"].value <= nodes["expires-at"].max);
 const longDefault = new Date(nodes["expires-at"].value);
 const threeYears = new Date();
 threeYears.setFullYear(threeYears.getFullYear() + 3);
@@ -291,4 +310,11 @@ assert.equal(nodes["share-url"].value, "");
 assert.equal(nodes["qr-output"].hidden, true);
 assert.equal(nodes["qr-image"].children.length, 0);
 assert.ok(nodes["qr-shares"].querySelectorAll("button").every(button => button.disabled));
+// 選べる範囲は、範囲の端を選んでも上限の確認に通る。
+const fixedNow = new Date(2026, 9, 30, 12, 0, 30);
+const timedBounds = expiryBounds("timed", fixedNow);
+assert.equal(timedBounds.min, "2026-10-30T12:01");
+assert.equal(timedBounds.max, "2026-11-30T12:00");
+assert.ok(new Date(timedBounds.max) <= new Date(fixedNow.getTime() + 31 * 86400000));
+assert.ok(new Date(timedBounds.min) > fixedNow);
 console.log("Sharing page interactions passed");

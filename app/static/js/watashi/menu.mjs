@@ -11,8 +11,15 @@ if (toggle && menu && layout && closeButton && backdrop) {
     document.querySelector("#site-header"),
     document.querySelector("#site-content"),
   ].filter(Boolean);
-  let desktopOpen = true;
-  let open = wideScreen.matches;
+  // 広い画面の開閉は、ページを移動しても保つ。保存できない環境では、開いた状態から始める。
+  const readPreference = () => {
+    try { return window.localStorage.getItem("menuOpen") !== "false"; } catch (_error) { return true; }
+  };
+  const savePreference = (value) => {
+    try { window.localStorage.setItem("menuOpen", String(value)); } catch (_error) { /* 保存できなくても、開閉はできる。 */ }
+  };
+  let desktopOpen = readPreference();
+  let open = wideScreen.matches ? desktopOpen : false;
 
   function render({ focusMenu = false, restoreFocus = false } = {}) {
     const wide = wideScreen.matches;
@@ -23,16 +30,26 @@ if (toggle && menu && layout && closeButton && backdrop) {
     // Release the background before returning focus to the header button.
     for (const element of background) element.inert = false;
     toggle.hidden = false;
-    if (restoreFocus || (!open && focusInMenu) || (wide && focusOnClose)) toggle.focus();
+    // 広い画面では、閉じてもレール（アイコン）に操作できる項目が残るので、フォーカスは動かさない。
+    if (restoreFocus || (!open && !wide && focusInMenu) || (wide && focusOnClose)) toggle.focus();
 
     toggle.setAttribute("aria-expanded", String(open));
     toggle.setAttribute("aria-label", open ? "メニューを閉じる" : "メニューを開く");
     closeButton.hidden = wide;
     // Keep the drawer rendered so CSS can animate it; inert removes closed links from focus.
+    // Wide screens keep an icon-only rail when closed, so the links stay usable there.
+    const railOnly = !open && wide;
     menu.hidden = false;
-    menu.inert = !open;
-    if (open) menu.removeAttribute("aria-hidden");
+    menu.inert = !open && !wide;
+    if (open || wide) menu.removeAttribute("aria-hidden");
     else menu.setAttribute("aria-hidden", "true");
+    // The rail shows icons only; the label becomes a tooltip.
+    for (const link of menu.querySelectorAll("a[href]")) {
+      const label = link.querySelector(".nav-label");
+      if (!label) continue;
+      if (railOnly) link.setAttribute("title", label.textContent.trim());
+      else link.removeAttribute("title");
+    }
 
     if (modal) {
       menu.setAttribute("role", "dialog");
@@ -52,7 +69,10 @@ if (toggle && menu && layout && closeButton && backdrop) {
 
   function setOpen(value, options) {
     open = value;
-    if (wideScreen.matches) desktopOpen = value;
+    if (wideScreen.matches) {
+      desktopOpen = value;
+      savePreference(value);
+    }
     render(options);
   }
 

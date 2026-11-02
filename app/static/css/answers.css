@@ -218,16 +218,69 @@
   margin: 0;
 }
 
-#share-detail-answers > p {
-  padding: 1rem;
-  border-radius: 16px;
+.share-dialog-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.share-dialog-actions > button {
+  margin: 0;
+}
+
+/* 回答の表示：質問ごとに、1つの枠（質問の文と回答）にする。 */
+/* 共有の相手・鍵・期限など。回答の枠の上に、小さくまとめる。 */
+.answer-fact {
+  margin: 0.15rem 0;
+  font-size: 0.9375rem;
+}
+
+.answer-item {
+  min-width: 0;
+  margin-block: 0.75rem;
+  padding: 0.85rem 1rem 1rem;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-left: 5px solid var(--md-sys-color-primary);
+  border-radius: 12px;
   background: var(--md-sys-color-surface-container-low);
+}
+
+.answer-item--empty {
+  border-left-color: var(--md-sys-color-outline);
+}
+
+.answer-item-question {
+  margin: 0 0 0.5rem;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.answer-item-value {
+  margin: 0;
+  font-size: 1.0625rem;
+  line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
+/* 未回答・未定・回答しない：回答の代わりに、状態を札で示す。 */
+.answer-item-state {
+  display: inline-block;
+  margin: 0;
+  padding: 0.15rem 0.75rem;
+  border-radius: 999px;
+  background: var(--md-sys-color-surface-container-high);
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 0.875rem;
+}
+
 @media (max-width: 640px) {
-  .share-dialog-heading > button {
+  .share-dialog-heading > button,
+  .share-dialog-actions > button {
     width: auto;
     flex-shrink: 0;
   }

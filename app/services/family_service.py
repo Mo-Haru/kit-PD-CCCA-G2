@@ -538,6 +538,9 @@ def update_share(share_id: str, body: dict) -> dict:
         fail("not_found", 404, "共有が見つかりません。", actor_id=user.id)
     if share.status != "active" and share.status != "key_pending":
         fail("share_stopped", 409, "停止した共有は更新できません。", actor_id=user.id)
+    if _expired(share):
+        # 期限切れの共有は受信者へ配信されない。内容だけ更新しても届かないので、期限の変更か新しい共有にしてもらう。
+        fail("share_expired", 409, "期限が切れた共有は更新できません。期限を変更するか、新しく共有してください。", actor_id=user.id)
     connection = db.session.get(FamilyConnection, share.connection_id)
     if connection is None or connection.status != "active":
         fail("share_stopped", 409, "接続が解除されているため更新できません。", actor_id=user.id)
@@ -563,6 +566,7 @@ def update_share(share_id: str, body: dict) -> dict:
             FamilyShare.owner_user_id == user.id,
             FamilyShare.status.in_(("active", "key_pending")),
             FamilyShare.stopped_at.is_(None),
+            or_(FamilyShare.expires_at.is_(None), FamilyShare.expires_at > utcnow()),
             FamilyShare.current_version == expected,
         ).values(current_version=version, recipient_key_id=current_key.id, status="active", updated_at=utcnow())
         .execution_options(synchronize_session=False)
@@ -572,6 +576,9 @@ def update_share(share_id: str, body: dict) -> dict:
         db.session.refresh(share)
         if share.status == "stopped" or share.stopped_at is not None:
             fail("share_stopped", 409, "停止した共有は更新できません。", actor_id=user.id)
+        if _expired(share):
+            fail("share_expired", 409, "期限が切れた共有は更新できません。期限を変更するか、新しく共有してください。",
+                 actor_id=user.id)
         fail("revision_conflict", 409, "別の版があるため更新できません。", actor_id=user.id)
     db.session.add(FamilyShareVersion(
         share_id=share.id, version=version, hpke_enc=enc, ciphertext=ciphertext, crypto_suite=HPKE_SUITE,

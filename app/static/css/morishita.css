@@ -303,3 +303,277 @@
   height: auto;
   image-rendering: pixelated;
 }
+
+/* 家族に共有する画面の、手順の表示。 */
+.sensitive .share-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sensitive .share-steps > li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  white-space: nowrap;
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 999px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 0.875rem;
+}
+
+.sensitive .share-steps > li[data-step-state="current"] {
+  border-color: var(--md-sys-color-primary);
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-surface);
+  font-weight: 700;
+}
+
+.sensitive .share-steps > li[data-step-state="done"]::before {
+  content: "✓";
+}
+
+.sensitive .share-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+}
+
+.sensitive .share-heading h1 {
+  margin: 0;
+}
+
+.sensitive .share-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 48px;
+  padding-inline: 0.75rem;
+  border-radius: 999px;
+  color: var(--md-sys-color-primary);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.sensitive .share-back:hover {
+  background: var(--md-sys-color-secondary-container);
+}
+
+.sensitive .share-back-icon {
+  flex-shrink: 0;
+}
+
+.sensitive .share-steps button {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+}
+
+.sensitive .share-steps button:disabled {
+  background: none;
+  color: inherit;
+  opacity: 1;
+}
+
+.sensitive .share-steps button:not(:disabled) {
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+/* 戻るは左、次へ・共有を確定は右。 */
+.sensitive .share-nav {
+  justify-content: space-between;
+  margin-top: 1.25rem;
+}
+
+.sensitive .share-nav .share-forward {
+  margin-inline-start: auto;
+}
+
+.sensitive .share-expiry {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+
+.sensitive .share-expiry .md-field {
+  flex: 1 1 16rem;
+}
+
+@media (max-width: 640px) {
+  .sensitive .share-nav button {
+    flex-basis: auto;
+  }
+}
+
+/* 家族画面のダッシュボード：上に数、下にカードを並べる。 */
+.sensitive .dash-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+}
+
+.sensitive .dash-heading h1 {
+  margin: 0;
+}
+
+.sensitive .dash-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: 0.75rem;
+  margin: 1.25rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sensitive .dash-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--md-sys-color-surface-container);
+}
+
+.sensitive .dash-stat-label {
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.sensitive .dash-stat-figure {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+}
+
+.sensitive .dash-stat-value {
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.sensitive .dash-stat-unit,
+.sensitive .dash-stat-note {
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 0.8125rem;
+}
+
+/* 対応が必要なときだけ、薄い黄色にする（共有の「再共有が必要」と同じ色）。 */
+.sensitive .dash-stat[data-attention="true"] {
+  border-color: #b08b2e;
+  background: #fff3cf;
+  color: #5a4300;
+}
+
+.sensitive .dash-stat[data-attention="true"] :is(.dash-stat-label, .dash-stat-unit, .dash-stat-note) {
+  color: #5a4300;
+}
+
+.sensitive .dash-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+/* パソコンの広さでは2列。家族のカードは、カード2枚分の幅にする。 */
+@media (min-width: 960px) {
+  .sensitive .dash-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sensitive .dash-card-wide {
+    grid-column: 1 / -1;
+  }
+}
+
+.sensitive .dash-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.6rem;
+}
+
+.sensitive .dash-card-head > h2 {
+  margin: 0;
+}
+
+.sensitive .dash-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-inline-start: auto;
+}
+
+.sensitive .dash-card-actions button {
+  margin: 0;
+}
+
+/* 家族の一覧は、横に並べる。「家族から外す」は、編集中だけ。 */
+.sensitive .dash-family-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 0.75rem;
+}
+
+.sensitive .dash-family-list > .record-card + .record-card {
+  margin-top: 0;
+}
+
+.sensitive .dash-family-list[data-editing="false"] .family-remove {
+  display: none;
+}
+
+.sensitive .dash-family-list .family-remove {
+  min-height: 36px;
+  padding-inline: 0.9rem;
+}
+
+/* 赤い塗りの削除ボタン。 */
+.site-content .sensitive:not(.account-page) .dash-family-list .family-remove:not(:disabled) {
+  border-color: var(--md-sys-color-error);
+  background: var(--md-sys-color-error);
+  color: #fff;
+}
+
+.sensitive .dash-card {
+  min-width: 0;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--paper);
+}
+
+.sensitive .dash-card > h2 {
+  margin: 0 0 0.6rem;
+  font-size: 1.125rem;
+}
+
+.sensitive .dash-card .record-list {
+  margin: 0.5rem 0 0;
+}
+
+.sensitive .dash-card #connections > .record-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}

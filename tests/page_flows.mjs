@@ -93,7 +93,11 @@ check("array values survive", presentAnswer(stored.items.skip).valueText.include
 
 const parent = element();
 fillAnswerList(parent, entriesFromPayload(chapterPayload, catalog));
-const shown = parent.children.map((row) => row.textContent).join("\n");
+const textOf = (node) => [node.textContent, ...(node.children || []).map(textOf)].join("\n");
+const shown = parent.children.map(textOf).join("\n");
+check("each question is its own card", parent.children.length === Object.keys(chapterPayload.items).length
+  && parent.children.every((card) => card.className.includes("answer-item")));
+check("an undecided question shows a state label, not an empty answer", parent.children.some((card) => card.children.some((part) => part.className === "answer-item-state" && part.textContent === "未定")));
 check("family view shows the answer", shown.includes("残す質問") && shown.includes("<script>alert(1)</script>"));
 check("family view shows undecided and unanswered", shown.includes("未定") && shown.includes("未回答"));
 check("markup is not assigned as html", parent.children.every((row) => row.html === null) && !shown.includes("隠す"));
@@ -492,7 +496,7 @@ check("failed proof disables the new passkey", proofFailed && disabled.some((pat
 const afterFailure = await loadAnswerDocument();
 check("failed proof leaves the current key usable", afterFailure.document.items.no.state === "declined");
 
-const { confirmationCoversShare, confirmationStillMatches } = await import("../app/static/js/watashi/family.mjs");
+const { confirmationCoversShare, confirmationStillMatches } = await import("../app/static/js/watashi/family-share-flow.mjs");
 const previewSelection = { scope: "questions", ids: ["keep"] };
 const previewPayload = plaintextForSelection(stored, catalog, previewSelection);
 const confirmedContext = {

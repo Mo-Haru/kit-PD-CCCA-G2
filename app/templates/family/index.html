@@ -1,77 +1,105 @@
 {% extends "base.html" %}
-{% block title %}家族共有 | 意思の記録{% endblock %}
+{% block page_title %}家族共有{% endblock %}
 {% block extra_head %}
   <link rel="stylesheet" href="{{ url_for('static', filename='css/morishita.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/answers.css') }}">
 {% endblock %}
 {% block content %}
   <div class="sensitive answer-demo" id="family-page">
-    <h1>家族共有</h1>
-    <p>共有する回答と家族を確認してから送信します。回答を保存し直しても、発行済みの共有内容は変わりません。</p>
+    <div class="dash-heading">
+      <h1>家族共有</h1>
+      <button id="share-start" class="button-primary" type="button" disabled>共有を開始</button>
+    </div>
+    <p id="share-start-help" class="note" hidden>共有できる家族がいません。「家族の招待」から家族を招待してください。</p>
     <p id="lock-state" role="status" aria-live="polite">状態を確認しています。</p>
     <p id="status" class="status-message" role="status" aria-live="polite"></p>
-    <button id="unlock-here" class="sharing-unlock" type="button" data-unlock-state="locked" disabled>回答の暗号化を解除</button>
-    <h2>招待</h2>
-    <div class="actions">
-      <button id="invite-open" type="button" disabled>リンクで招待</button>
-      <button id="invite-qr" type="button" disabled>QRコードで招待</button>
+
+    <ul class="dash-stats" aria-label="共有の状況">
+      <li class="dash-stat">
+        <span class="dash-stat-label">家族</span>
+        <span class="dash-stat-figure"><strong id="stat-family" class="dash-stat-value">—</strong><span class="dash-stat-unit">人</span></span>
+        <span class="dash-stat-note">共有できる家族</span>
+      </li>
+      <li class="dash-stat">
+        <span class="dash-stat-label">共有中</span>
+        <span class="dash-stat-figure"><strong id="stat-sharing" class="dash-stat-value">—</strong><span class="dash-stat-unit">件</span></span>
+        <span class="dash-stat-note">自分が家族に共有</span>
+      </li>
+      <li class="dash-stat">
+        <span class="dash-stat-label">共有されたもの</span>
+        <span class="dash-stat-figure"><strong id="stat-received" class="dash-stat-value">—</strong><span class="dash-stat-unit">件</span></span>
+        <span class="dash-stat-note">家族から受け取り中</span>
+      </li>
+      <li id="stat-attention-tile" class="dash-stat" data-attention="false">
+        <span class="dash-stat-label"><span id="stat-attention-mark" aria-hidden="true"></span>要対応</span>
+        <span class="dash-stat-figure"><strong id="stat-attention" class="dash-stat-value">—</strong><span class="dash-stat-unit">件</span></span>
+        <span id="stat-attention-note" class="dash-stat-note">再共有が必要な共有、家族登録の確認待ち</span>
+      </li>
+    </ul>
+
+    <div class="dash-grid">
+      <section class="dash-card dash-card-wide" aria-labelledby="dash-family-title">
+        <div class="dash-card-head">
+          <h2 id="dash-family-title">家族</h2>
+          <div class="dash-card-actions">
+            <button id="family-edit" type="button" aria-pressed="false" disabled>編集</button>
+            <button id="invite-start" type="button" disabled>家族の招待</button>
+          </div>
+        </div>
+        <ul id="connections" class="record-list dash-family-list" data-editing="false"></ul>
+        <ul id="incoming" class="record-list"></ul>
+        {% include "family/_confirmation.html" %}
+      </section>
+      <section class="dash-card" aria-labelledby="dash-sent-title">
+        <h2 id="dash-sent-title">自分が家族に共有したもの</h2>
+        <ul id="shares" class="record-list"></ul>
+      </section>
+      <section class="dash-card" aria-labelledby="dash-received-title">
+        <h2 id="dash-received-title">家族から共有されたもの</h2>
+        <ul id="received" class="record-list"></ul>
+      </section>
     </div>
-    <div id="invite-output" class="demo-notice" hidden>
-      <div id="invite-qr-output"></div>
-      <p id="invite-link" class="secret-link"></p>
-      <button id="copy-invite" type="button">招待リンクをコピー</button>
-      <p class="note">相手が承諾すると、相手の画面に確認リンクと確認コードが表示されます。相手本人から受け取り、確認リンクを開くか、下の一覧で確認コードを入力すると家族として登録されます。</p>
-    </div>
-    <ul id="incoming" class="record-list"></ul>
-    {% include "family/_confirmation.html" %}
-    <h2>家族</h2>
-    <ul id="connections" class="record-list"></ul>
-    <h2>共有する範囲</h2>
-    <p class="note">解除前の文字列は、回答全体を暗号化して保存したデータの一部です。</p>
-    <fieldset class="scope-options">
-      <legend>範囲</legend>
-      <label><input type="radio" name="scope" value="all"> 全体</label>
-      <label><input type="radio" name="scope" value="chapters"> 章</label>
-      <label><input type="radio" name="scope" value="questions" checked> 質問</label>
-    </fieldset>
-    <div id="chapters" class="choice-list" hidden></div>
-    <div id="questions" class="choice-list"></div>
-    <section id="all-answers" aria-label="共有対象の全回答" hidden></section>
-    <h2>共有を作る</h2>
-    <div class="md-field md-field--raised">
-      <label class="md-field-label" for="connection">共有する家族</label>
-      <select id="connection" class="md-field-control"></select>
-    </div>
-    <div class="md-field md-field--raised">
-      <label class="md-field-label" for="expires-at">期限</label>
-      <input id="expires-at" class="md-field-control" type="datetime-local" aria-describedby="expires-at-help">
-      <p id="expires-at-help" class="md-field-help">空欄なら期限なし。</p>
-    </div>
-    <button id="show-preview" type="button" disabled>共有する内容を確認</button>
-    <div id="preview-output"></div>
-    <label class="confirmation"><input id="confirm-share" type="checkbox" disabled> 表示された家族・期限・回答だけを共有することを確認しました</label>
-    <button id="share" class="button-primary" type="button" disabled>共有を確定</button>
-    <h2>自分が家族に共有したもの</h2>
-    <ul id="shares" class="record-list"></ul>
-    <h2>家族から共有されたもの</h2>
-    <ul id="received" class="record-list"></ul>
+    <dialog id="invite-dialog" class="share-dialog" aria-labelledby="invite-dialog-title">
+      <div class="share-dialog-shell">
+        <div class="share-dialog-header">
+          <div class="share-dialog-heading">
+            <h2 id="invite-dialog-title">家族を招待</h2>
+            <button id="invite-close-top" type="button">閉じる</button>
+          </div>
+        </div>
+        <div class="share-dialog-body">
+          <p id="invite-dialog-status" class="note">招待リンクかQRコードを作り、家族に渡します。作るときに、パスキーで本人確認をします。</p>
+          <div class="actions">
+            <button id="invite-open" type="button" disabled>リンクで招待</button>
+            <button id="invite-qr" type="button" disabled>QRコードで招待</button>
+          </div>
+          <div id="invite-output" class="demo-notice" hidden>
+            <div id="invite-qr-output"></div>
+            <p id="invite-link" class="secret-link"></p>
+            <button id="copy-invite" type="button">招待リンクをコピー</button>
+            <p class="note">相手が承諾すると、相手の画面に確認リンクと確認コードが表示されます。相手本人から受け取り、確認リンクを開くか、家族カードの一覧で確認コードを入力すると家族として登録されます。閉じると、リンクとQRコードは消えます。</p>
+          </div>
+        </div>
+        <div class="share-dialog-footer actions">
+          <button id="invite-close-bottom" type="button">閉じる</button>
+        </div>
+      </div>
+    </dialog>
     <dialog id="family-detail" class="share-dialog" aria-labelledby="family-detail-title">
       <div class="share-dialog-shell">
         <div class="share-dialog-header">
           <div class="share-dialog-heading">
             <h2 id="family-detail-title">共有内容</h2>
-            <button id="family-close-top" type="button">閉じる</button>
+            <div class="share-dialog-actions">
+              <button id="family-stop" class="button-danger" type="button" hidden>配信停止</button>
+              <button id="family-close" type="button">閉じる</button>
+            </div>
           </div>
-          <button id="family-stop-top" class="button-danger" type="button" hidden>配信停止</button>
         </div>
         <div class="share-dialog-body">
           <p id="family-detail-status" role="status" aria-live="polite"></p>
-          <button id="family-detail-unlock" class="sharing-unlock" type="button" data-unlock-state="locked" hidden>回答の暗号化を解除</button>
+          <button id="family-detail-unlock" class="sharing-unlock" type="button" data-unlock-state="locked" hidden>パスキーで本人確認して表示</button>
           <div id="family-detail-body"></div>
-        </div>
-        <div class="share-dialog-footer actions">
-          <button id="family-stop-bottom" class="button-danger" type="button" hidden>配信停止</button>
-          <button id="family-close-bottom" type="button">閉じる</button>
         </div>
       </div>
     </dialog>
