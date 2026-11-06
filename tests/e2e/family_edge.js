@@ -66,7 +66,14 @@ async function saveAnswers(user) {
   });
 }
 
-async function statusText(page) { return (await page.locator("#status").textContent()) || ""; }
+// エラーはページ上部の共通の枠（#site-alert）に、それ以外はページ内の #status に出る。
+async function statusText(page) {
+  return page.evaluate(() => {
+    const alert = document.querySelector("#site-alert");
+    if (alert && !alert.hidden) return document.querySelector("#site-alert-text").textContent || "";
+    return document.querySelector("#status")?.textContent || "";
+  });
+}
 
 async function connect(sender, recipient) {
   await openFamily(sender);
@@ -96,7 +103,7 @@ async function chooseRecipient(page, name) {
 async function openShare(user, updateId = null) {
   await user.page.goto(`${BASE}/family/share${updateId ? `?update=${encodeURIComponent(updateId)}` : ""}`);
   await user.page.waitForFunction(() => !document.querySelector("#step-select").hidden
-    || document.querySelector("#status").classList.contains("is-error"), null, { timeout: 15000 });
+    || !document.querySelector("#site-alert").hidden, null, { timeout: 15000 });
 }
 
 async function next(page, step) {
