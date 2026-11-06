@@ -1,3 +1,4 @@
+import { notify } from "./site-alert.mjs";
 import { api } from "./client.mjs";
 import { qrDataUrl, showConfirmation } from "./family-confirmation.mjs";
 
@@ -13,7 +14,7 @@ export async function bindFamilyInvitation(root, call = api, address = location,
   let authenticated = false;
   let stale = false;
   let confirmationLink = "";
-  function show(text) { node("invite-status").textContent = text; }
+  function show(text, error = false) { notify(root, node("invite-status"), text, error); }
   function tokenStillMatches() {
     if (!stale && readToken() !== token) {
       stale = true;
@@ -21,13 +22,13 @@ export async function bindFamilyInvitation(root, call = api, address = location,
       node("invite-guest").hidden = true;
       node("invite-confirmation").hidden = true;
       node("invite-session").textContent = "招待リンクが変更されました。";
-      show("新しい招待リンクを確認するため、ページを再読み込みしてください。");
+      show("新しい招待リンクを確認するため、ページを再読み込みしてください。", true);
     }
     return !stale;
   }
   if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token)) {
     node("invite-session").textContent = "招待リンクを確認できません。";
-    show("届いた招待リンクまたはQRコードから、もう一度開いてください。");
+    show("届いた招待リンクまたはQRコードから、もう一度開いてください。", true);
     return;
   }
   const login = new URL("/auth", address.origin);
@@ -40,7 +41,7 @@ export async function bindFamilyInvitation(root, call = api, address = location,
     try {
       await navigator.clipboard.writeText(confirmationLink);
       show("確認リンクをコピーしました。招待した方に直接渡してください。");
-    } catch (_error) { show("コピーできませんでした。表示中のリンクを選択してコピーしてください。"); }
+    } catch (_error) { show("コピーできませんでした。表示中のリンクを選択してコピーしてください。", true); }
   });
   async function session() {
     const state = await call("/api/v1/auth/session");
@@ -61,7 +62,7 @@ export async function bindFamilyInvitation(root, call = api, address = location,
       if (!state?.authenticated) return;
       if (state.user_id !== accountId) {
         accountId = state.user_id;
-        show("ログイン中のアカウントが変わりました。表示名を確認して、もう一度承諾してください。");
+        show("ログイン中のアカウントが変わりました。表示名を確認して、もう一度承諾してください。", true);
         return;
       }
       const result = await call("/api/v1/family/invitations/request", { method: "POST", body: { token } });
@@ -71,14 +72,14 @@ export async function bindFamilyInvitation(root, call = api, address = location,
       node("invite-confirmation").hidden = true;
       confirmationLink = showConfirmation(node, result.confirmation, address.origin, makeQr);
       show("招待を承諾しました。下の確認リンクか確認コードを、招待した方に直接渡してください。");
-    } catch (error) { if (tokenStillMatches()) show(error.message || "招待を承諾できませんでした。"); }
+    } catch (error) { if (tokenStillMatches()) show(error.message || "招待を承諾できませんでした。", true); }
     finally {
       busy = false;
       accept.disabled = accepted || !authenticated || !tokenStillMatches();
     }
   });
   try { const state = await session(); if (state) accountId = state.user_id; }
-  catch (_error) { if (tokenStillMatches()) show("ログイン状態を確認できません。ページを開き直してください。"); }
+  catch (_error) { if (tokenStillMatches()) show("ログイン状態を確認できません。ページを開き直してください。", true); }
 }
 
 if (typeof document !== "undefined") bindFamilyInvitation(document);

@@ -66,7 +66,7 @@ def test_auth_page_is_standalone(client):
 
 
 def test_common_pages_have_session_header(client):
-    for path in ("/", "/answers", "/sharing", "/family", "/family/share", "/family/invite", "/transfer", "/view/layout-check"):
+    for path in ("/", "/answers", "/sharing", "/sharing/new", "/family", "/family/share", "/family/invite", "/transfer", "/view/layout-check"):
         response = client.get(path)
         body = response.get_data(as_text=True)
         assert response.status_code == 200
@@ -120,7 +120,7 @@ def test_feature_pages_name_their_files(client):
 
 
 def test_unimplemented_actions_reject_post(client):
-    for path in (*FEATURE_PAGES, "/sharing", "/answers/demo", "/auth"):
+    for path in (*FEATURE_PAGES, "/sharing", "/sharing/new", "/answers/demo", "/auth"):
         response = client.post(path)
         assert response.status_code == 405
 
@@ -132,13 +132,65 @@ def test_sharing_uses_real_client_and_requires_explicit_confirmation(client):
     assert response.status_code == 200
     markup = StrictMarkup(response.get_data(as_text=True))
     markup.module_script("/static/js/watashi/sharing.mjs")
-    for element_id in ("share-fields", "confirm-share", "create-qr"):
-        assert "disabled" in markup.one_id(element_id).attrs
-    assert "hidden" in markup.one_id("qr-output").attrs
-    assert "readonly" in markup.one_id("share-url").attrs
-    markup.one_id("qr-image")
+    # 共有の画面は一覧。作る手順は /sharing/new。解除のボタンはなく、回答を開くときに本人確認をする。
+    assert markup.one_id("share-start").tag == "button"
+    assert "disabled" in markup.one_id("share-start").attrs
+    for removed in ("unlock-here", "create-qr", "confirm-share", "share-url", "qr-image", "show-preview"):
+        assert not any(element.attrs.get("id") == removed for element in markup.elements)
+    markup.one_id("qr-shares")
+    assert "hidden" in markup.one_id("share-detail-unlock").attrs
+    # 停止と閉じるは右上に並べる。下部のボタンはない。
+    assert "button-danger" in markup.one_id("share-stop").attrs["class"].split()
+    assert markup.one_id("share-stop").ancestors[-1] is markup.one_id("share-close").ancestors[-1]
+    detail = markup.one_id("share-detail")
+    assert not any(detail in element.ancestors and "share-dialog-footer" in (element.attrs.get("class") or "").split()
+                   for element in markup.elements)
+    for removed in ("share-stop-top", "share-stop-bottom", "share-close-top", "share-close-bottom"):
+        assert not any(element.attrs.get("id") == removed for element in markup.elements)
     assert response.headers["Cache-Control"] == "no-store"
     assert client.get("/static/js/watashi/sharing.mjs").status_code == 200
+
+
+def test_sharing_new_page_is_a_stepwise_flow(client):
+    from tests.test_menu import StrictMarkup
+
+    response = client.get("/sharing/new")
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "no-store"
+    markup = StrictMarkup(response.get_data(as_text=True))
+    markup.module_script("/static/js/watashi/sharing-new.mjs")
+    order = ["step-unlock", "step-select", "step-type", "step-confirm", "step-done"]
+    positions = [markup.elements.index(markup.one_id(step)) for step in order]
+    assert positions == sorted(positions)
+    for step in order[1:]:
+        assert "hidden" in markup.one_id(step).attrs
+    assert "hidden" not in markup.one_id("step-unlock").attrs
+    for control in ("unlock-here", "step-next", "create-qr", "confirm-share"):
+        assert "disabled" in markup.one_id(control).attrs
+    # 戻るリンクは、見出しと同じ行（右上）にある。
+    heading = markup.one_id("share-title").ancestors[-1]
+    assert heading in markup.one_id("back-to-sharing").ancestors and "share-heading" in heading.attrs["class"].split()
+    assert markup.one_id("back-to-sharing").attrs["href"] == "/sharing"
+    # 範囲は最初は未選択。リンクの種類は、緊急用から始める。
+    scopes = [e for e in markup.elements if e.tag == "input" and e.attrs.get("name") == "scope"]
+    assert len(scopes) == 3 and not any("checked" in radio.attrs for radio in scopes)
+    modes = {e.attrs["value"]: e for e in markup.elements if e.tag == "input" and e.attrs.get("name") == "mode"}
+    assert set(modes) == {"emergency", "timed", "long"} and "checked" in modes["emergency"].attrs
+    assert "hidden" in markup.one_id("expiry-field").attrs and "hidden" in markup.one_id("long-warning").attrs
+    assert "readonly" in markup.one_id("share-url").attrs
+    body = response.get_data(as_text=True)
+    for title in ("ロックを解除してください。", "共有範囲を選択してください。",
+                  "どんなリンクを、いつまで有効にしますか？", "この内容で共有リンクを作りますか？"):
+        assert title in body
+    assert client.get("/static/js/watashi/sharing-new.mjs").status_code == 200
+
+
+def test_sharing_new_page_flow():
+    result = subprocess.run(
+        ["node", "tests/sharing_new_page.mjs"], cwd=Path(__file__).resolve().parents[1],
+        capture_output=True, text=True, timeout=20, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_share_link_qr_image_is_drawn_locally():
@@ -316,6 +368,25 @@ def test_family_share_login_keeps_the_share_being_updated(client):
 def test_family_share_page_flow():
     result = subprocess.run(
         ["node", "tests/family_share_page.mjs"], cwd=Path(__file__).resolve().parents[1],
+        capture_output=True, text=True, timeout=20, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_error_frame_is_common_and_above_the_page_content(client):
+    # 全ページ共通のエラー表示の枠（本文の枠の上）。ログイン・新規登録は共通の枠を持たない。
+    for path in ("/", "/answers", "/sharing", "/sharing/new", "/family", "/family/share", "/transfer", "/view/x"):
+        body = client.get(path).get_data(as_text=True)
+        assert 'id="site-alert"' in body and 'role="alert"' in body, path
+        assert body.index('id="site-alert"') < body.index('id="site-content"'), path
+        assert "/static/js/watashi/site-alert.mjs" in body, path
+    assert 'id="site-alert"' not in client.get("/auth").get_data(as_text=True)
+    assert client.get("/static/js/watashi/site-alert.mjs").status_code == 200
+
+
+def test_error_frame_module():
+    result = subprocess.run(
+        ["node", "tests/site_alert.mjs"], cwd=Path(__file__).resolve().parents[1],
         capture_output=True, text=True, timeout=20, check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr

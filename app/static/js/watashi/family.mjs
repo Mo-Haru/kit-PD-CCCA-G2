@@ -3,6 +3,7 @@ import {
 } from "./client.mjs";
 import { entriesFromPayload, fillAnswerList } from "./crypto.mjs";
 import { toIso } from "./family-share-flow.mjs";
+import { notify } from "./site-alert.mjs";
 import qrcode from "../../vendor/qrcode-generator-2.0.4.mjs";
 import { hideConfirmation, showConfirmation } from "./family-confirmation.mjs";
 
@@ -27,8 +28,8 @@ const shareState = share => share.status !== "stopped" && share.expires_at && ne
 const node = id => document.querySelector(`#${id}`);
 let confirmationLink = "";
 
-function show(text) {
-  status.textContent = text;
+function show(text, error = false) {
+  notify(document, status, text, error);
   if (node("family-detail")?.open) node("family-detail-status").textContent = text;
   if (node("invite-dialog")?.open) node("invite-dialog-status").textContent = text;
 }
@@ -237,7 +238,7 @@ function showError(error) {
   }
   const cancelled = ["NotAllowedError", "AbortError"].includes(error.name);
   show(error.code === "reauth_required" ? "本人確認の期限が切れました。もう一度、パスキーで本人確認をしてください。"
-    : cancelled ? "本人確認を完了できませんでした。もう一度お試しください。" : error.message || "操作できませんでした。");
+    : cancelled ? "本人確認を完了できませんでした。もう一度お試しください。" : error.message || "操作できませんでした。", true);
 }
 
 async function unlockFamily() {
@@ -393,7 +394,7 @@ async function refresh() {
       field.append(label, code);
       item.append(help, field, button("確認コードで家族に追加", async () => {
         if (!code.value.trim()) {
-          show("申請した家族から受け取った確認コードを入力してください。");
+          show("申請した家族から受け取った確認コードを入力してください。", true);
           return;
         }
         const result = await api(`/api/v1/family/invitations/${invitation.id}/confirm`, {
@@ -511,26 +512,26 @@ if (document.querySelector("#family-page")) {
       await navigator.clipboard.writeText(confirmationLink);
       show("確認リンクをコピーしました。招待した方に直接渡してください。");
     } catch (_error) {
-      show("コピーできなかったので、表示中のリンクを選んで渡してください。");
+      show("コピーできなかったので、表示中のリンクを選んで渡してください。", true);
     }
   });
   document.querySelector("#copy-invite").addEventListener("click", async () => {
     const link = document.querySelector("#invite-link").textContent;
     if (!link) {
-      show("先に招待リンクを作ってください。");
+      show("先に招待リンクを作ってください。", true);
       return;
     }
     try {
       await navigator.clipboard.writeText(link);
       show("招待リンクをコピーしました。");
     } catch (_error) {
-      show("コピーできなかったので、表示中のリンクを選んで共有してください。");
+      show("コピーできなかったので、表示中のリンクを選んで共有してください。", true);
     }
   });
 
   api("/api/v1/answers/questions").then((body) => {
     catalog = body;
-  }).catch((error) => show(error.message));
+  }).catch((error) => show(error.message, true));
 
-  refresh().catch((error) => show(error.message));
+  refresh().catch((error) => show(error.message, true));
 }

@@ -1,3 +1,4 @@
+import { notify } from "./site-alert.mjs";
 import { b64urlToBytes, bytesToB64url } from "./bytes.mjs";
 import {
   api, confirmMigrationAccess, getUnlockState, login, registerTransferredPasskey, unlock, unlockedKeyMaterial,
@@ -11,8 +12,8 @@ let targetPrivate = null;
 let timer = 0;
 let decryptConfirmed = false;
 
-function show(text) {
-  status.textContent = text;
+function show(text, error = false) {
+  notify(document, status, text, error);
 }
 
 async function fingerprintOf(bytes) {
@@ -82,7 +83,7 @@ document.querySelector("#login-here").addEventListener("click", async () => {
     show("ログインしました。鍵はまだ解除されていません。");
     await syncAccess();
   } catch (error) {
-    show(error.message || "ログインできませんでした。");
+    show(error.message || "ログインできませんでした。", true);
   }
 });
 
@@ -93,7 +94,7 @@ document.querySelector("#unlock-here").addEventListener("click", async () => {
     await syncAccess();
     await refreshSource();
   } catch (error) {
-    show(error.message || "鍵を解除できませんでした。鍵は使える状態にしていません。");
+    show(error.message || "鍵を解除できませんでした。鍵は使える状態にしていません。", true);
   }
 });
 
@@ -106,11 +107,11 @@ document.querySelector("#source-start").addEventListener("click", async () => {
     show("移行を開始しました。新しい端末にこのIDを入力してください。");
     window.clearInterval(timer);
     timer = window.setInterval(() => {
-      refreshSource().catch((error) => show(error.message));
+      refreshSource().catch((error) => show(error.message, true));
     }, 2000);
     await refreshSource();
   } catch (error) {
-    show(error.message);
+    show(error.message, true);
   }
 });
 
@@ -126,7 +127,7 @@ document.querySelector("#source-approve").addEventListener("click", async () => 
     show("コードと指紋を確認しました。");
     await refreshSource();
   } catch (error) {
-    show(error.message);
+    show(error.message, true);
   }
 });
 
@@ -137,7 +138,7 @@ document.querySelector("#source-cancel").addEventListener("click", async () => {
     sessionStorage.removeItem(SOURCE_KEY);
     show("移行を取り消しました。古いパスキーはそのまま使えます。");
   } catch (error) {
-    show(error.message);
+    show(error.message, true);
   }
 });
 
@@ -158,12 +159,12 @@ document.querySelector("#target-bind").addEventListener("click", async () => {
     document.querySelector("#target-code").textContent = bound.migration.confirmation_code;
     document.querySelector("#target-fingerprint").textContent = bound.migration.fingerprint;
     if (local !== bound.migration.fingerprint) {
-      show("表示された指紋がこの端末の鍵と一致しません。承認しないでください。");
+      show("表示された指紋がこの端末の鍵と一致しません。承認しないでください。", true);
       return;
     }
     show("コードと指紋がこの端末の鍵と一致しています。古い端末の表示と比べてください。");
   } catch (error) {
-    show(error.message);
+    show(error.message, true);
   }
 });
 
@@ -171,7 +172,7 @@ document.querySelector("#target-finish").addEventListener("click", async () => {
   const transferToken = sessionStorage.getItem("wn-transfer-token");
   const migrationId = sessionStorage.getItem("wn-transfer-id");
   if (!transferToken || !targetPrivate || !migrationId) {
-    show("先にこの端末の鍵を登録してください。");
+    show("先にこの端末の鍵を登録してください。", true);
     return;
   }
   const headers = { "X-Transfer-Token": transferToken };
@@ -197,7 +198,7 @@ document.querySelector("#target-finish").addEventListener("click", async () => {
     show("新しいパスキーを登録しました。この画面でそのパスキーによりログインし、復号確認をしてから完了してください。古いパスキーはまだ有効です。");
   } catch (error) {
     decryptConfirmed = false;
-    show(error.message || "新しい端末での確認がまだできません。古いパスキーは無効化していません。");
+    show(error.message || "新しい端末での確認がまだできません。古いパスキーは無効化していません。", true);
   }
 });
 
@@ -212,14 +213,14 @@ document.querySelector("#target-confirm").addEventListener("click", async () => 
   } catch (error) {
     decryptConfirmed = false;
     document.querySelector("#confirm-result").textContent = "";
-    show(error.message || "復号確認ができないため、古いパスキーは無効化していません。");
+    show(error.message || "復号確認ができないため、古いパスキーは無効化していません。", true);
   }
 });
 
 document.querySelector("#target-finalize").addEventListener("click", async () => {
   const migrationId = sessionStorage.getItem("wn-transfer-id") || document.querySelector("#target-id").value.trim();
   if (!decryptConfirmed) {
-    show("先に新しいパスキーで既存データを復号確認してください。ログインだけでは完了できません。");
+    show("先に新しいパスキーで既存データを復号確認してください。ログインだけでは完了できません。", true);
     return;
   }
   try {
@@ -228,11 +229,11 @@ document.querySelector("#target-finalize").addEventListener("click", async () =>
     decryptConfirmed = false;
     show("移行を完了しました。古いパスキーは無効です。");
   } catch (error) {
-    show(error.message || "まだ完了できません。古いパスキーは無効化していません。");
+    show(error.message || "まだ完了できません。古いパスキーは無効化していません。", true);
   }
 });
 
-syncAccess().catch((error) => show(error.message));
+syncAccess().catch((error) => show(error.message, true));
 if (sourceId) {
-  refreshSource().catch((error) => show(error.message));
+  refreshSource().catch((error) => show(error.message, true));
 }

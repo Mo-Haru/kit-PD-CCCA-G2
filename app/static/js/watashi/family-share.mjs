@@ -1,6 +1,7 @@
 import {
   api, createFamilyShare, getUnlockState, loadAnswerDocument, unlock, updateFamilyShare,
 } from "./client.mjs";
+import { notify } from "./site-alert.mjs";
 import { entriesFromPayload, fillAnswerList, plaintextForSelection, presentAnswer, shareFingerprint } from "./crypto.mjs";
 import { confirmationCoversShare, confirmationStillMatches, shareSteps, toIso } from "./family-share-flow.mjs";
 
@@ -32,8 +33,7 @@ export function bindFamilyShare(root, client = {
   let connections = [];
 
   function show(text, error = false) {
-    node("status").textContent = text;
-    node("status").classList.toggle("is-error", error);
+    notify(root, node("status"), text, error);
   }
   function unlocked() {
     return answersReady && !accountChanged && Boolean(session?.authenticated) && client.getUnlockState().unlocked;

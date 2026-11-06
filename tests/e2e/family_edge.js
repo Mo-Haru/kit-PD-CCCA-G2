@@ -66,7 +66,14 @@ async function saveAnswers(user) {
   });
 }
 
-async function statusText(page) { return (await page.locator("#status").textContent()) || ""; }
+// エラーはページ上部の共通の枠（#site-alert）に、それ以外はページ内の #status に出る。
+async function statusText(page) {
+  return page.evaluate(() => {
+    const alert = document.querySelector("#site-alert");
+    if (alert && !alert.hidden) return document.querySelector("#site-alert-text").textContent || "";
+    return document.querySelector("#status")?.textContent || "";
+  });
+}
 
 async function connect(sender, recipient) {
   await openFamily(sender);
@@ -96,7 +103,7 @@ async function chooseRecipient(page, name) {
 async function openShare(user, updateId = null) {
   await user.page.goto(`${BASE}/family/share${updateId ? `?update=${encodeURIComponent(updateId)}` : ""}`);
   await user.page.waitForFunction(() => !document.querySelector("#step-select").hidden
-    || document.querySelector("#status").classList.contains("is-error"), null, { timeout: 15000 });
+    || !document.querySelector("#site-alert").hidden, null, { timeout: 15000 });
 }
 
 async function next(page, step) {
@@ -289,16 +296,16 @@ async function cards(page, list) {
     !lateBody.includes("ダミー回答") && !(await B.page.locator("#family-detail").evaluate(node => node.open)));
   await B.page.unroute("**/api/v1/family/received/*");
   // (b) QR閲覧：開始の通信が遅いあいだに「閲覧を終了」を押す。
-  await A.page.goto(`${BASE}/sharing`);
-  await A.page.waitForFunction(() => !document.querySelector("#unlock-here").disabled);
-  await A.page.click("#unlock-here");
-  await A.page.waitForFunction(() => document.querySelector("#unlock-here").dataset.unlockState === "unlocked");
+  // 共有リンクは /sharing/new の手順（解除 → 範囲 → 種類と期限 → 再確認）で作る。開くと自動で解除が始まる。
+  await A.page.goto(`${BASE}/sharing/new`);
+  await A.page.waitForFunction(() => !document.querySelector("#step-select").hidden);
   await A.page.check("input[name=scope][value=all]");
+  await A.page.click("#step-next");
   await A.page.check("input[name=mode][value=timed]");
   await A.page.dispatchEvent("input[name=mode][value=timed]", "change");
   await A.page.fill("#expires-at", localInMinutes(60));
-  await A.page.click("#show-preview");
-  await A.page.waitForFunction(() => !document.querySelector("#confirm-share").disabled);
+  await A.page.click("#step-next");
+  await A.page.waitForSelector("#step-confirm:not([hidden])");
   await A.page.check("#confirm-share");
   await A.page.dispatchEvent("#confirm-share", "change");
   await A.page.click("#create-qr");

@@ -30,6 +30,7 @@ SHARED_PAGES = (
     ("/answers", 200, "/answers"),
     ("/answers/demo", 200, "/answers"),
     ("/sharing", 200, "/sharing"),
+    ("/sharing/new", 200, "/sharing"),
     ("/family", 200, "/family"),
     ("/family/invite", 200, "/family"),
     ("/family/share", 200, "/family"),
@@ -165,10 +166,19 @@ def assert_shared_layout(markup, current_href, *, account_page=False):
     backdrop = markup.one_id("menu-backdrop")
     menu = markup.one_id("site-menu")
     content = markup.one_id("site-content")
-    for element in (backdrop, menu, content):
+    alert = markup.one_id("site-alert")
+    # エラー表示の枠は、ページ本文の枠の上にある（同じ縦の並びの、直前）。
+    column = content.ancestors[-1]
+    assert "site-column" in (column.attrs.get("class") or "").split()
+    for element in (backdrop, menu, column):
         assert element.ancestors and element.ancestors[-1] is layout, (
-            f"#{element.attrs['id']} must be a direct child of #site-layout"
+            f"{element.tag} must be a direct child of #site-layout"
         )
+    assert alert.ancestors[-1] is column, "#site-alert must sit in the same column as #site-content"
+    assert markup.elements.index(alert) < markup.elements.index(content), "#site-alert must come before #site-content"
+    assert alert.attrs.get("role") == "alert" and "hidden" in alert.attrs
+    assert markup.one_id("site-alert-text").ancestors[-1] is alert
+    assert markup.one_id("site-alert-close").tag == "button"
     assert header not in layout.ancestors
     assert menu.tag == "aside"
     assert header not in menu.ancestors
@@ -369,6 +379,7 @@ def test_development_banner_only_on_pages_with_a_notice(client):
     ("/answers", "回答"),
     ("/answers/demo", "回答画面のテスト"),
     ("/sharing", "共有"),
+    ("/sharing/new", "共有リンクを作る"),
     ("/family", "家族共有"),
     ("/family/invite", "家族からの招待"),
     ("/family/share", "家族に共有する"),

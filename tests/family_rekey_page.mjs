@@ -131,7 +131,7 @@ function createDocument() {
   doc.body = body;
   const ids = [
     "status", "lock-state", "incoming", "connections", "shares", "received",
-    "family-page", "family-edit", "invite-start", "invite-dialog", "invite-dialog-status", "invite-close-top", "invite-close-bottom", "stat-family", "stat-sharing", "stat-received", "stat-attention", "stat-attention-tile", "stat-attention-mark", "stat-attention-note", "history-view", "received-view", "share-start", "share-start-help",
+    "family-page", "site-alert", "site-alert-text", "family-edit", "invite-start", "invite-dialog", "invite-dialog-status", "invite-close-top", "invite-close-bottom", "stat-family", "stat-sharing", "stat-received", "stat-attention", "stat-attention-tile", "stat-attention-mark", "stat-attention-note", "history-view", "received-view", "share-start", "share-start-help",
     "invite-link", "login-here",
     "invite-open", "copy-invite", "accept-open",
     "invite-qr", "invite-qr-output", "invite-output", "encrypted-answers", "answer-ciphertext",
@@ -462,12 +462,14 @@ await buttonNamed("確認コードで家族に追加").click();
 check("empty code is not sent", calls.filter(item => item.path.endsWith("/inv-out/confirm")).length === confirmsBefore);
 codeInput.value = "AAAA-AAAA";
 await buttonNamed("確認コードで家族に追加").click();
-check("wrong code shows remaining attempts", document.querySelector("#status").textContent.includes("あと4回"));
+check("wrong code shows remaining attempts in the alert frame above the page", document.querySelector("#site-alert-text").textContent.includes("あと4回") && document.querySelector("#site-alert").hidden === false);
+check("the inline status is empty while the error is in the alert frame", document.querySelector("#status").textContent === "");
 document.querySelector("#confirm-code-inv-out").value = "ABCD-EFGH";
 await buttonNamed("確認コードで家族に追加").click();
 const confirmPost = calls.findLast(item => item.path.endsWith("/inv-out/confirm"));
 check("the typed code is sent", confirmPost && confirmPost.body.code === "ABCD-EFGH");
 check("success names the added family", document.querySelector("#status").textContent.includes("申請した家族 さんを家族に追加しました"));
+check("a success clears the error frame", document.querySelector("#site-alert").hidden === true);
 check("requester does not get a code field", document.querySelector("#confirm-code-inv-in") === null);
 confirmStop = false;
 await buttonNamed("確認コードを再発行").click();

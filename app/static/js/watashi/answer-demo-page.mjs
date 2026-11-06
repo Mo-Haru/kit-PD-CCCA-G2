@@ -1,6 +1,7 @@
 import * as client from "./client.mjs";
 import { initializeAnswerDemo } from "./answer-demo.mjs";
 import { createDemoAnswerStore } from "./answer-demo-store.mjs";
+import { notify } from "./site-alert.mjs";
 
 const ids = [...document.querySelectorAll("[data-demo-question]")].map(question => question.dataset.questionId);
 const store = createDemoAnswerStore(client, ids);
@@ -20,8 +21,7 @@ const ui = initializeAnswerDemo(document, { editable: false, onChange() {
 } });
 
 function show(text, error = false) {
-  status.textContent = text;
-  status.classList.toggle("is-error", error);
+  notify(document, status, text, error);
 }
 
 function sync() {

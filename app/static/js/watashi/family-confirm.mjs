@@ -1,3 +1,4 @@
+import { notify } from "./site-alert.mjs";
 import { api, unlock } from "./client.mjs";
 
 const MESSAGES = {
@@ -17,7 +18,7 @@ export async function bindFamilyConfirm(root, { call = api, reauth = unlock, add
   let done = false;
   let stale = false;
   let accountId = null;
-  function show(text) { node("confirm-status").textContent = text; }
+  function show(text, error = false) { notify(root, node("confirm-status"), text, error); }
   // 同じタブで別の確認リンクを開くと、ページは残ったままfragmentだけが変わる。
   // 最初のリンクの申請者を承認しないよう、変わった時点で操作を止めて再読み込みを求める。
   function tokenStillMatches() {
@@ -27,13 +28,13 @@ export async function bindFamilyConfirm(root, { call = api, reauth = unlock, add
       node("confirm-guest").hidden = true;
       node("confirm-action").hidden = true;
       node("confirm-session").textContent = "確認リンクが変更されました。";
-      show("新しい確認リンクを確認するため、ページを再読み込みしてください。");
+      show("新しい確認リンクを確認するため、ページを再読み込みしてください。", true);
     }
     return !stale;
   }
   if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token)) {
     node("confirm-session").textContent = "確認リンクを確認できません。";
-    show("家族から受け取った確認リンクまたはQRコードから、もう一度開いてください。");
+    show("家族から受け取った確認リンクまたはQRコードから、もう一度開いてください。", true);
     return;
   }
   const login = new URL("/auth", address.origin);
@@ -59,7 +60,7 @@ export async function bindFamilyConfirm(root, { call = api, reauth = unlock, add
       if (!state?.authenticated) return;
       if (state.user_id !== accountId) {
         accountId = state.user_id;
-        show("ログイン中のアカウントが変わりました。表示名を確認して、もう一度押してください。");
+        show("ログイン中のアカウントが変わりました。表示名を確認して、もう一度押してください。", true);
         return;
       }
       show("パスキーで本人確認をしています…");
@@ -79,7 +80,7 @@ export async function bindFamilyConfirm(root, { call = api, reauth = unlock, add
       if (!tokenStillMatches()) return;
       show(["NotAllowedError", "AbortError"].includes(error.name)
         ? "本人確認を完了できませんでした。もう一度お試しください。"
-        : MESSAGES[error.code] || error.message || "家族に追加できませんでした。");
+        : MESSAGES[error.code] || error.message || "家族に追加できませんでした。", true);
     } finally {
       busy = false;
       button.disabled = done || stale || accountId === null;
@@ -89,7 +90,7 @@ export async function bindFamilyConfirm(root, { call = api, reauth = unlock, add
     const state = await session();
     if (state?.authenticated) accountId = state.user_id;
   } catch (_error) {
-    if (tokenStillMatches()) show("ログイン状態を確認できません。ページを開き直してください。");
+    if (tokenStillMatches()) show("ログイン状態を確認できません。ページを開き直してください。", true);
   }
 }
 

@@ -1,4 +1,5 @@
 import { addPasskey, api, getUnlockState, logout, unlock } from "./client.mjs";
+import { notify } from "./site-alert.mjs";
 
 const status = document.querySelector("#status");
 const list = document.querySelector("#passkeys");
@@ -8,8 +9,7 @@ let sessionKnown = false;
 let authenticated = false;
 
 function show(text, isError = false) {
-  status.textContent = text;
-  status.classList.toggle("is-error", isError);
+  notify(document, status, text, isError);
 }
 
 function syncControls() {
@@ -77,7 +77,7 @@ async function refresh() {
         const body = {};
         if (passkey.proven_at && active.length <= 1) {
           if (!document.querySelector("#confirm-last").checked) {
-            show("最後のパスキーを無効化するには、データを復号できなくなる確認にチェックしてください。");
+            show("最後のパスキーを無効化するには、データを復号できなくなる確認にチェックしてください。", true);
             return;
           }
           body.confirm_last = true;
@@ -87,7 +87,7 @@ async function refresh() {
           show("パスキーを無効化しました。");
           await refresh();
         } catch (error) {
-          show(error.message);
+          show(error.message, true);
         }
       });
       item.append(button);
