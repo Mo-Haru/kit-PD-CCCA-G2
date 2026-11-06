@@ -81,12 +81,13 @@ export function bindAnswersPage(root, api = client) {
     node("unlock-here").disabled = busy;
     node("saveAnswers").disabled = !ready || busy || !dirty;
   }
-  function showPage(index) {
+  function showPage(index, { scroll = false } = {}) {
     page = index;
     pages.forEach((element, number) => { element.hidden = number !== index; });
     node("prevPage").hidden = index === 0;
     node("nextPage").hidden = index >= pages.length - 1;
-    root.defaultView?.scrollTo?.(0, 0);
+    // 本文は共通レイアウトの .site-content の中でスクロールするので、window ではなく新しいページの先頭へ移る。
+    if (scroll) pages[index]?.scrollIntoView?.({ block: "start" });
   }
   async function run(action) {
     if (busy) return;
@@ -157,8 +158,8 @@ export function bindAnswersPage(root, api = client) {
     node("acpExplanation").hidden = true;
     node("openExplanation").setAttribute("aria-expanded", "false");
   });
-  node("nextPage").addEventListener("click", () => showPage(Math.min(page + 1, pages.length - 1)));
-  node("prevPage").addEventListener("click", () => showPage(Math.max(page - 1, 0)));
+  node("nextPage").addEventListener("click", () => showPage(Math.min(page + 1, pages.length - 1), { scroll: true }));
+  node("prevPage").addEventListener("click", () => showPage(Math.max(page - 1, 0), { scroll: true }));
   node("unlock-here").addEventListener("click", () => run(unlockAndLoad));
   node("saveAnswers").addEventListener("click", () => run(async () => {
     saved("回答を暗号化して保存しています…");

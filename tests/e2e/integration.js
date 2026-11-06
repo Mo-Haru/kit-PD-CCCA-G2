@@ -114,6 +114,13 @@ async function lineCallback(body, signature) {
   await A.page.click("#nextPage");
   await A.page.waitForSelector("#page2:not([hidden])");
   record(S1, "「次へ」で2ページ目（質問11〜21）に切り替わる", await A.page.isHidden("#page1"));
+  // 本文は .site-content の中でスクロールする。ページを切り替えたら、新しいページの先頭が見える位置にする。
+  await A.page.waitForTimeout(500);
+  const page2Top = await A.page.evaluate(() => {
+    const top = document.querySelector("#page2").getBoundingClientRect().top;
+    return { top: Math.round(top), height: window.innerHeight };
+  });
+  record(S1, "「次へ」のあと、2ページ目の先頭が画面内に見える", page2Top.top >= 0 && page2Top.top < page2Top.height / 2, JSON.stringify(page2Top));
   await choose(A.page, 11, "家族");
   await A.page.fill("#freeText", "テスト用の自由記述です");
   await A.page.click("#saveAnswers");
