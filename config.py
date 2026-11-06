@@ -93,6 +93,13 @@ class BaseConfig:
     SHARE_ACTIVE_LIMIT = 20
     # アプリの手前にあるリバースプロキシの段数。0ならX-Forwarded-Forを信用しない。
     TRUSTED_PROXY_COUNT = proxy_count_from_environ()
+    # LINE通知（小橋担当）。秘密情報は .env にだけ置く。未設定なら /line/callback は503を返す。
+    LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "").strip() or None
+    LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "").strip() or None
+    LINE_TARGET_USER_ID = os.environ.get("LINE_TARGET_USER_ID", "").strip() or None
+    LINE_DAILY_TIME = env_or("DAILY_NOTIFICATION_TIME", "18:00")
+    # 通知から案内する回答画面のURLの元。未設定なら WEBAUTHN_ORIGIN を使う。
+    APP_BASE_URL = os.environ.get("APP_BASE_URL", "").strip() or None
 
 
 class DevelopmentConfig(BaseConfig):
@@ -106,6 +113,12 @@ class TestingConfig(BaseConfig):
     SECRET_KEY = "test-only"
     CONTACT_HASH_KEY = "test-only-contact-hash-key-32b!!"
     WEBAUTHN_ORIGIN = "http://localhost"
+    # 手元の .env にLINEの秘密があっても、テストでは使わない。
+    LINE_CHANNEL_ACCESS_TOKEN = None
+    LINE_CHANNEL_SECRET = None
+    LINE_TARGET_USER_ID = None
+    LINE_DAILY_TIME = "18:00"
+    APP_BASE_URL = None
     SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
     SQLALCHEMY_ENGINE_OPTIONS = {
         "connect_args": {"check_same_thread": False},

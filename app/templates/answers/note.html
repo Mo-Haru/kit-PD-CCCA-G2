@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block page_title %}わたしノート{% endblock %}
+{% block extra_head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/note.css') }}">
+{% endblock %}
+{% block content %}
+  {#- わたしノート・進捗表示画面（沖担当の画面を統合）。クラス名は note- で始め、他の画面とぶつからないようにしている。 -#}
+  <div class="note-page sensitive" data-note-page>
+    <div class="note-header">
+      <h1 class="note-title">わたしノート</h1>
+      <p class="note-lead">あなたの想いを、少しずつ書きとめましょう。</p>
+    </div>
+
+    <section class="note-access" aria-label="回答の読み込み">
+      <p id="status" class="status-message" role="status" aria-live="polite">ログイン状態を確認しています。</p>
+      <div class="actions">
+        <a id="login-here" class="demo-launch" data-auth-link href="{{ url_for('auth.index', next=url_for('answers.note')) }}" hidden>ログイン・新規登録</a>
+        <button id="unlock-here" type="button" hidden>回答の暗号化を解除</button>
+      </div>
+    </section>
+
+    <div class="note-main">
+      <section class="note-card note-progress" aria-labelledby="note-progress-heading">
+        <h2 id="note-progress-heading" class="note-card-title">回答の進み具合</h2>
+        <p class="note-progress-percent" aria-hidden="true">
+          <span id="note-percent" class="note-progress-number">0</span><span class="note-progress-unit">%</span>
+          <span class="note-progress-done">完了</span>
+        </p>
+        <div id="note-bar" class="note-bar" role="progressbar" aria-labelledby="note-progress-heading" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div id="note-bar-fill" class="note-bar-fill"></div>
+        </div>
+        <p id="note-progress-text" class="note-progress-text">回答の暗号化を解除すると、進み具合を表示します。</p>
+      </section>
+
+      <section class="note-secure" aria-labelledby="note-secure-heading">
+        <span class="note-secure-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M7 10V7a5 5 0 0 1 10 0v3"/>
+            <rect x="4" y="10" width="16" height="11" rx="2.5"/>
+            <circle cx="12" cy="15.5" r="1.4" fill="currentColor" stroke="none"/>
+          </svg>
+        </span>
+        <div class="note-secure-body">
+          <h2 id="note-secure-heading" class="note-secure-title">暗号化して保存</h2>
+          <p class="note-secure-text">あなたの回答は、この端末で暗号化してから保存しています。サーバーに回答の平文はありません。</p>
+        </div>
+      </section>
+
+      <section class="note-history" aria-labelledby="note-history-heading">
+        <h2 id="note-history-heading" class="note-section-title">質問と、あなたの答え</h2>
+        <ul id="note-list" class="note-list">
+          {% for question in catalog.questions %}
+            <li class="note-item" data-note-id="{{ question.id }}" data-note-question="{{ question.text }}">
+              <p class="note-item-date">回答の暗号化を解除すると表示します</p>
+              <h3 class="note-question">{{ question.text }}</h3>
+              <p class="note-answer-label">あなたの答え</p>
+              <p class="note-answer note-answer--hidden">（暗号化されています）</p>
+              <div class="note-actions">
+                <a class="note-btn note-btn-sub" href="{{ url_for('answers.index') }}#q-{{ question.id }}">回答する</a>
+              </div>
+            </li>
+          {% endfor %}
+        </ul>
+      </section>
+    </div>
+
+    <div class="note-footer">
+      <p>答えを選び直すときは「書き直す」を押すと、回答の画面の、その質問を開きます。</p>
+    </div>
+  </div>
+  <script type="module" src="{{ url_for('static', filename='js/watashi/note-page.mjs') }}"></script>
+{% endblock %}

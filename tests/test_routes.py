@@ -3,8 +3,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 
-FEATURE_PAGES = ("/answers",)
-FORBIDDEN_PHRASES = ("ログインしました", "保存しました", "暗号化しました", "共有しました")
+FEATURE_PAGES = ("/answers", "/note")
 
 
 def test_legacy_hello_still_responds(client):
@@ -18,7 +17,7 @@ def test_home_explains_the_foundation(client):
     body = response.get_data(as_text=True)
     assert response.status_code == 200
     assert "意思の記録" in body
-    assert "未実装" in body
+    assert 'href="/note"' in body
     assert "運営サーバーに回答の内容を読ませない" in body
     assert 'href="/answers"' in body
     assert 'href="/sharing"' in body
@@ -98,25 +97,45 @@ def test_health_reports_database_connection(client):
     assert response.get_json() == {"status": "ok", "database": "ok"}
 
 
-def test_feature_pages_are_marked_unimplemented(client):
-    for path in FEATURE_PAGES:
-        response = client.get(path)
-        body = response.get_data(as_text=True)
-        assert response.status_code == 200
-        assert "未実装" in body
-        assert "この操作は実行できません" in body
-        assert "<fieldset disabled>" in body
-        for phrase in FORBIDDEN_PHRASES:
-            assert phrase not in body
+def test_answer_page_lists_the_acp_questions_without_local_storage(client):
+    body = client.get("/answers").get_data(as_text=True)
+    assert "未実装" not in body
+    assert "人生会議（ACP）とは？" in body
+    assert "生活の手助けが必要になったら、誰に相談したいですか？" in body
+    assert "ケアマネジャーとは？" in body
+    assert body.count("data-acp-question") == 22
+    assert 'id="page1"' in body and 'id="page2"' in body
+    assert 'id="freeText"' in body
+    assert "answers-page.mjs" in body
+    for path in ("app/static/js/watashi/answers-page.mjs", "app/static/js/watashi/note-page.mjs"):
+        source = Path(path).read_text(encoding="utf-8")
+        assert "localStorage.setItem" not in source and "sessionStorage" not in source
 
 
-def test_feature_pages_name_their_files(client):
-    expectations = {
-        "/answers": "app/blueprints/answers.py",
-    }
-    for path, needle in expectations.items():
+def test_note_page_shows_progress_for_every_question(client):
+    body = client.get("/note").get_data(as_text=True)
+    assert "回答の進み具合" in body
+    assert body.count('class="note-item"') == 22
+    assert 'href="/answers#q-' in body
+    assert "note-page.mjs" in body
+
+
+def test_every_note_link_points_at_a_question_on_the_answer_page(client):
+    import re
+    note = client.get("/note").get_data(as_text=True)
+    answers = client.get("/answers").get_data(as_text=True)
+    targets = re.findall(r'href="/answers#(q-[0-9a-f-]+)"', note)
+    assert len(targets) == 22
+    for target in targets:
+        assert f'id="{target}"' in answers, target
+
+
+def test_in_page_login_buttons_keep_the_url_fragment(client):
+    # data-auth-link のリンクは、header-session.mjs が #以降（どの質問か）をログイン後へ引き継ぐ。
+    for path in ("/answers", "/note"):
         body = client.get(path).get_data(as_text=True)
-        assert needle in body
+        button = body[body.index('id="login-here"'):].split(">", 1)[0]
+        assert "data-auth-link" in button, path
 
 
 def test_unimplemented_actions_reject_post(client):

@@ -15,8 +15,12 @@
     <ul class="cards">
       <li>
         <h3><a href="{{ url_for('answers.index') }}">回答</a></h3>
-        <p>入力・保存・閲覧。ブラウザ側の暗号化も含みます。<span class="badge">未実装</span></p>
+        <p>人生会議（ACP）の質問に答えます。回答はこの端末で暗号化してから保存します。</p>
         <p><a href="{{ url_for('answers.demo') }}">テスト用の回答画面</a></p>
+      </li>
+      <li>
+        <h3><a href="{{ url_for('answers.note') }}">わたしノート</a></h3>
+        <p>回答の進み具合と、質問ごとの答えを確認できます。</p>
       </li>
       <li>
         <h3><a href="{{ url_for('sharing.index') }}">共有</a></h3>

@@ -16,7 +16,7 @@
 
 運営サーバーには回答の内容を読ませない方針です。回答を更新したときに共有先へ自動反映する方式ではなく、本人が明示的に最新の意思を共有する方式を検討しています。
 
-LINE API を使うかどうかは未決定です。
+LINE は、毎日の通知で回答画面へ案内するために使います（[LINE通知](docs/line-notice.md)）。LINEのボタンで選んだ回答は保存しません。
 
 実在の個人情報や回答本文は、開発データに使わないでください。確認はダミーデータだけで行います。
 
@@ -44,7 +44,7 @@ LINE API を使うかどうかは未決定です。
 | --- | --- | --- |
 | データベース | SQLite（`instance/dev.db`） | 既存の接続設定がなかった。追加の DB ソフトなしで、ローカルの起動確認ができる。 |
 | 秘密情報 | 開発用のダミー `dev-change-me` | 外部サービスの鍵はまだ無い。鍵が無くてもこの土台は起動できる。この値は本番の秘密鍵ではない。 |
-| 業務モデル | 永続化層のモデルを定義済み | 回答・共有内容は暗号文として保存する。パスキー、家族共有、QR閲覧、端末移行の処理は入っている。回答入力画面は未実装。 |
+| 業務モデル | 永続化層のモデルを定義済み | 回答・共有内容は暗号文として保存する。パスキー、家族共有、QR閲覧、端末移行、回答の入力画面、わたしノート、LINE通知の処理は入っている。 |
 
 直接使うライブラリは `Pipfile` で次のバージョンまたは許容範囲に指定しています。
 
@@ -148,7 +148,8 @@ pytest は Node.js も使います。`tests/browser_crypto.mjs` と `tests/page_
 | --- | --- |
 | http://localhost:5000/ | 「意思の記録」と、回答・共有・認証・家族・移行へのリンクが見える |
 | http://localhost:5000/hello | 本文が `Hello, World!` |
-| http://localhost:5000/answers | 回答入力は「未実装」。保存APIは別で、`docs/morishita.md` の契約を使う |
+| http://localhost:5000/answers | 人生会議（ACP）の質問21問と自由記述。開くとパスキーで解除し、回答を端末内で暗号化して保存できる（先に `seed-questions` が必要） |
+| http://localhost:5000/note | わたしノート。回答の進み具合（%）と、質問ごとの答え・回答日。「書き直す」で回答の画面のその質問を開く |
 | http://localhost:5000/answers/demo | ダミー質問6問。パスキーで解錠し、暗号化保存・再読み込み・共有を試せる |
 | http://localhost:5000/sharing | 発行済みの共有の一覧。「共有を開始」から `/sharing/new` へ進み、鍵の解除 → 内容 → 種類と期限 → 再確認 → 確定の順でリンクとQRコードを作れる。共有内容のモーダルから停止できる |
 | http://localhost:5000/auth | パスキーの登録、ログイン、鍵の解除ができる |
@@ -157,6 +158,8 @@ pytest は Node.js も使います。`tests/browser_crypto.mjs` と `tests/page_
 | http://localhost:5000/health | JSON で `status` と `database` がどちらも `ok` |
 
 `/hello` は、以前の単一ファイルのアプリが返していた確認用の応答です。HTML の画面ではなく、本文 `Hello, World!` をそのまま返します。
+
+`/answers` の質問・選択肢・用語の説明は `app/data/acp-questions.json` にあります。初回は `init-db` のあとに `py -3.14 -m pipenv run python -m flask --app run seed-questions` で質問をDBへ追加します。繰り返しても重複せず、既存の質問・回答は置き換えません。本番でも使う質問なので、開発環境に限らず実行できます。
 
 `/answers/demo` は、本実装の `/answers` とは別の保存・共有テスト画面です。質問とサンプル回答は `app/data/answer-demo.json` にあります。初回は `init-db` のあとに `py -3.14 -m pipenv run python -m flask --app run seed-answer-demo` でテスト質問6問をDBへ追加します。このコマンドは繰り返しても重複せず、既存の質問・回答・アカウントは置き換えません。
 
@@ -266,7 +269,7 @@ py -3.14 -m pipenv run python -m flask --app run init-db
 | 家族共有 | `app/services/family_service.py`、`/family` | 回答更新の自動反映。LINE送信 |
 | QRの閲覧開始と停止 | `app/services/qr_service.py`、`/view/<id>` | QR画像の生成と表示（坂担当の画面） |
 | パスキー認証 | `app/blueprints/auth.py`、`/auth`、`app/services/auth_service.py` | ログインできたことにする仮処理 |
-| LINE API | 利用が決まってから `app/services/line.py` を新設 | ソースへの API キーの直書き |
+| LINE通知 | `app/services/line.py`、`/line/callback` | ソースへの API キーの直書き。LINEで受けた回答の保存 |
 
 ## 共通ファイルを変えるとき
 
@@ -304,7 +307,6 @@ py -3.14 -m pipenv install --dev "追加するパッケージ==バージョン"
 
 - `.env`、`.venv/`、`instance/`、ローカル DB、`Pipfile.lock` をコミットしない
 - 実在の個人情報や回答を入れない
-- 未実装の回答入力画面、QR画像、LINE送信が動いているように見せるコードを入れない
 - 既存 DB のデータを消す処理を実行しない
 - 回答本文を、サーバーが読める形でログに出さない
 - API の鍵が無いとアプリが起動しない状態にしない
@@ -337,17 +339,18 @@ push のあと、GitHub のリポジトリページで **Compare & pull request*
 
 ## 実装済みと、まだ未実装のもの
 
-パスキー、ブラウザ内の暗号、家族共有、QRの閲覧セッション、端末移行は使えます。接続方法は `docs/morishita.md` です。回答の入力画面（今牧）、ノートと履歴（沖、`note/`）、坂担当のQR画像、小橋担当のLINEは未実装のままです。森下側の画面からは変更しません。
+パスキー、ブラウザ内の暗号、家族共有、QRの閲覧セッション、端末移行は使えます。接続方法は `docs/morishita.md` です。回答の入力画面（今牧）、わたしノート（沖）、QRコードの画像（坂）、LINE通知（小橋）は、本体のアプリに統合しました（2026-11-06）。
 
 | 機能 | 状態 | 場所 |
 | --- | --- | --- |
-| 回答の入力画面 | 未実装 | `app/templates/answers/`。保存は `PUT /api/v1/answers/current` を呼ぶ |
+| 回答の入力画面 | 実装済み | `/answers`（`app/templates/answers/index.html`、`answers-page.mjs`）。質問は `app/data/acp-questions.json` |
+| わたしノート（進み具合） | 実装済み | `/note`（`app/templates/answers/note.html`、`note-page.mjs`、`note.css`） |
 | ブラウザ側の暗号化・復号 | 実装済み | `app/static/js/watashi/crypto.mjs`。サーバーは復号しない |
 | パスキー認証 | 実装済み | `/auth` と `/api/v1/auth/` |
 | 家族共有 | 実装済み | `/family` と `/api/v1/family/` |
-| QRコードの画像 | 未実装 | 画像と表示は坂担当。閲覧開始APIは `/api/v1/qr-shares/` |
+| QRコードの画像 | 実装済み | 共有画面（`/sharing`）で端末内で描画。閲覧は `/view/<id>` |
 | 回答更新の自動反映 | 採用しない | 共有の更新APIを明示的に呼ぶ |
-| LINE API | 未決定 | 使うと決まってから `app/services/line.py` |
+| LINE通知 | 実装済み | `app/services/line.py`。`flask line-send`、`flask line-schedule`、Webhookは `/line/callback` |
 | 本番データベース | 未決定 | ローカルは SQLite の暫定のまま |
 | Pipfile.lock を Git に含めるか | 含めない | `.gitignore` |
 | 公開方法 | 未決定 | デプロイ設定は置いていない |
@@ -382,7 +385,6 @@ push のあと、GitHub のリポジトリページで **Compare & pull request*
 - `http://localhost:5000/` で起動し、`/`、`/hello`、`/answers`、`/sharing`、`/auth`、`/family`、`/transfer`、`/health` が 200 になる
 - `/` は「意思の記録」を表示する
 - `/hello` の本文は `Hello, World!`
-- `/answers` と `/sharing` の画面操作は未実装のまま
 - `/auth`、`/family`、`/transfer` はパスキーと共有、移行の画面を返す
 - `/health` は `status` と `database` がどちらも `ok`
 - 実機のパスキーとPRFは未確認。テストは模擬パスキーとNode上の暗号関数

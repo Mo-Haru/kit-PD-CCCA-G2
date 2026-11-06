@@ -276,10 +276,14 @@ def test_sensitive_pages_keep_other_pages_unstyled_by_csp(client):
     assert "no-store" in auth.headers["Cache-Control"]
     assert "script-src 'self'" in auth.headers["Content-Security-Policy"]
     assert "unsafe-inline" not in auth.headers["Content-Security-Policy"]
-    answers = client.get("/answers")
-    assert "未実装" in answers.get_data(as_text=True)
-    assert "Content-Security-Policy" not in answers.headers
-    assert answers.headers["X-Content-Type-Options"] == "nosniff"
+    # 回答の画面とわたしノートは復号した回答を表示するので、保護する画面として扱う。
+    for path in ("/answers", "/note"):
+        page = client.get(path)
+        assert "no-store" in page.headers["Cache-Control"]
+        assert "unsafe-inline" not in page.headers["Content-Security-Policy"]
+    home = client.get("/")
+    assert "Content-Security-Policy" not in home.headers
+    assert home.headers["X-Content-Type-Options"] == "nosniff"
     family = client.get("/family")
     transfer = client.get("/transfer")
     assert family.status_code == transfer.status_code == 200

@@ -1,0 +1,674 @@
+{
+  "fixture_id": "acp-questions-v1",
+  "page_size": 10,
+  "glossary": [
+    {
+      "term": "人生会議（ACP）",
+      "description": "将来、病気や介護が必要になったときに備えて、自分が大切にしたいことや希望する医療・ケアについて、家族や医療・介護の関係者と前もって話し合うことです。"
+    },
+    {
+      "term": "ケアマネジャー",
+      "description": "介護が必要な人が適切な介護サービスを利用できるように、介護の計画を立てたり、関係する事業所との調整を行ったりする専門職です。"
+    }
+  ],
+  "categories": [
+    {
+      "id": "86df0306-1c2c-5974-ae9b-77a918fb6c86",
+      "title": "自分の価値観について",
+      "description": ""
+    },
+    {
+      "id": "1dc7951d-ef98-5f03-84f7-5c5fc15eb0c8",
+      "title": "将来の暮らしや介護について",
+      "description": ""
+    },
+    {
+      "id": "d31c3bfc-8e56-52f2-b61c-2d28b220318f",
+      "title": "家族や大切な人との話し合いについて",
+      "description": ""
+    },
+    {
+      "id": "21e6f361-b63c-5913-8fe5-c3151146bcde",
+      "title": "病気や医療について",
+      "description": ""
+    },
+    {
+      "id": "e943ac0e-824e-5706-86fb-6bbf1dfe1228",
+      "title": "緊急時や情報共有について",
+      "description": ""
+    },
+    {
+      "id": "cdbe02df-e954-5472-bdf8-d809545b9762",
+      "title": "自分の考え",
+      "description": "将来の医療や介護について、考えていることや大切にしたいことがあれば自由に書いてみましょう。"
+    }
+  ],
+  "questions": [
+    {
+      "id": "2c7be85b-2ca2-5703-9ee0-8040df413bf1",
+      "category_id": "86df0306-1c2c-5974-ae9b-77a918fb6c86",
+      "text": "将来、どんな生活を大切にしたいですか？",
+      "input_type": "single_choice",
+      "question_key": "acp-01",
+      "options": [
+        {
+          "value": "c1",
+          "text": "住み慣れた自宅で暮らしたい"
+        },
+        {
+          "value": "c2",
+          "text": "家族や大切な人の近くで暮らしたい"
+        },
+        {
+          "value": "c3",
+          "text": "必要な支援を受けながら安心して暮らしたい"
+        },
+        {
+          "value": "c4",
+          "text": "まだ決まっていない"
+        },
+        {
+          "value": "c5",
+          "text": "その他"
+        }
+      ]
+    },
+    {
+      "id": "aec94dcc-d5ef-5dc3-a1cb-2a02f016f800",
+      "category_id": "86df0306-1c2c-5974-ae9b-77a918fb6c86",
+      "text": "最近、どんなときに幸せを感じますか？",
+      "input_type": "single_choice",
+      "question_key": "acp-02",
+      "options": [
+        {
+          "value": "c1",
+          "text": "家族や友人と過ごすとき"
+        },
+        {
+          "value": "c2",
+          "text": "趣味や好きなことを楽しむとき"
+        },
+        {
+          "value": "c3",
+          "text": "一人でゆっくり過ごすとき"
+        },
+        {
+          "value": "c4",
+          "text": "仕事や活動に取り組むとき"
+        },
+        {
+          "value": "c5",
+          "text": "その他・まだ分からない"
+        }
+      ]
+    },
+    {
+      "id": "cbbe9c13-8d67-5903-a21e-fbaa7a9125a0",
+      "category_id": "86df0306-1c2c-5974-ae9b-77a918fb6c86",
+      "text": "これからも続けていきたいことは何ですか？",
+      "input_type": "single_choice",
+      "question_key": "acp-03",
+      "options": [
+        {
+          "value": "c1",
+          "text": "趣味や習い事"
+        },
+        {
+          "value": "c2",
+          "text": "家族や友人との交流"
+        },
+        {
+          "value": "c3",
+          "text": "旅行や外出"
+        },
+        {
+          "value": "c4",
+          "text": "地域活動やボランティア"
+        },
+        {
+          "value": "c5",
+          "text": "特に決まっていない"
+        }
+      ]
+    },
+    {
+      "id": "8d7cdfbe-e519-5bdb-bfaf-d621588369bd",
+      "category_id": "86df0306-1c2c-5974-ae9b-77a918fb6c86",
+      "text": "自分らしく生活するために、一番大切なことは何ですか？",
+      "input_type": "single_choice",
+      "question_key": "acp-04",
+      "options": [
+        {
+          "value": "c1",
+          "text": "自分で物事を決められること"
+        },
+        {
+          "value": "c2",
+          "text": "家族や大切な人と過ごせること"
+        },
+        {
+          "value": "c3",
+          "text": "健康でいられること"
+        },
+        {
+          "value": "c4",
+          "text": "好きなことを続けられること"
+        },
+        {
+          "value": "c5",
+          "text": "安心して生活できること"
+        }
+      ]
+    },
+    {
+      "id": "b462fbb7-58d6-559a-b01b-666c95a1a101",
+      "category_id": "86df0306-1c2c-5974-ae9b-77a918fb6c86",
+      "text": "毎日の生活で、これだけは失いたくないと思うものはありますか？",
+      "input_type": "single_choice",
+      "question_key": "acp-05",
+      "options": [
+        {
+          "value": "c1",
+          "text": "自分でできることは自分ですること"
+        },
+        {
+          "value": "c2",
+          "text": "家族とのつながり"
+        },
+        {
+          "value": "c3",
+          "text": "自分の時間"
+        },
+        {
+          "value": "c4",
+          "text": "住み慣れた環境"
+        },
+        {
+          "value": "c5",
+          "text": "今は分からない"
+        }
+      ]
+    },
+    {
+      "id": "fc64366d-773d-55f7-b91a-e2089f1695de",
+      "category_id": "1dc7951d-ef98-5f03-84f7-5c5fc15eb0c8",
+      "text": "将来、どこで生活したいですか？",
+      "input_type": "single_choice",
+      "question_key": "acp-06",
+      "options": [
+        {
+          "value": "c1",
+          "text": "今住んでいる自宅"
+        },
+        {
+          "value": "c2",
+          "text": "家族の近く"
+        },
+        {
+          "value": "c3",
+          "text": "高齢者向けの住まい"
+        },
+        {
+          "value": "c4",
+          "text": "状況に合わせて考えたい"
+        },
+        {
+          "value": "c5",
+          "text": "まだ決まっていない"
+        }
+      ]
+    },
+    {
+      "id": "9f41c9fe-2179-5a56-b21d-0eccc106a7f3",
+      "category_id": "1dc7951d-ef98-5f03-84f7-5c5fc15eb0c8",
+      "text": "介護が必要になったら、どのような生活を送りたいですか？",
+      "input_type": "single_choice",
+      "question_key": "acp-07",
+      "options": [
+        {
+          "value": "c1",
+          "text": "できる限り自宅で暮らしたい"
+        },
+        {
+          "value": "c2",
+          "text": "家族の近くで暮らしたい"
+        },
+        {
+          "value": "c3",
+          "text": "専門的な支援を受けられる場所で暮らしたい"
+        },
+        {
+          "value": "c4",
+          "text": "状況に応じて決めたい"
+        },
+        {
+          "value": "c5",
+          "text": "まだ分からない"
+        }
+      ]
+    },
+    {
+      "id": "fcefc5dc-3700-5d00-9326-33f036edd809",
+      "category_id": "1dc7951d-ef98-5f03-84f7-5c5fc15eb0c8",
+      "text": "将来の生活で、心配なことは何ですか？",
+      "input_type": "single_choice",
+      "question_key": "acp-08",
+      "options": [
+        {
+          "value": "c1",
+          "text": "病気や健康のこと"
+        },
+        {
+          "value": "c2",
+          "text": "介護や日常生活のこと"
+        },
+        {
+          "value": "c3",
+          "text": "お金のこと"
+        },
+        {
+          "value": "c4",
+          "text": "家族に負担をかけること"
+        },
+        {
+          "value": "c5",
+          "text": "特に心配はない"
+        },
+        {
+          "value": "c6",
+          "text": "その他"
+        }
+      ]
+    },
+    {
+      "id": "14124077-2b79-5873-9337-69269d38e543",
+      "category_id": "1dc7951d-ef98-5f03-84f7-5c5fc15eb0c8",
+      "text": "生活の手助けが必要になったら、誰に相談したいですか？",
+      "input_type": "single_choice",
+      "question_key": "acp-09",
+      "options": [
+        {
+          "value": "c1",
+          "text": "家族"
+        },
+        {
+          "value": "c2",
+          "text": "友人や知人"
+        },
+        {
+          "value": "c3",
+          "text": "医師や看護師"
+        },
+        {
+          "value": "c4",
+          "text": "ケアマネジャーなどの専門職"
+        },
+        {
+          "value": "c5",
+          "text": "まだ決まっていない"
+        }
+      ],
+      "glossary": [
+        "ケアマネジャー"
+      ]
+    },
+    {
+      "id": "edcc2baf-1708-570e-9732-eba0460b8e4f",
+      "category_id": "1dc7951d-ef98-5f03-84f7-5c5fc15eb0c8",
+      "text": "どのような支援があると安心できますか？",
+      "input_type": "single_choice",
+      "question_key": "acp-10",
+      "options": [
+        {
+          "value": "c1",
+          "text": "買い物や食事の支援"
+        },
+        {
+          "value": "c2",
+          "text": "通院の付き添い"
+        },
+        {
+          "value": "c3",
+          "text": "家事の手伝い"
+        },
+        {
+          "value": "c4",
+          "text": "話し相手や見守り"
+        },
+        {
+          "value": "c5",
+          "text": "まだ分からない"
+        }
+      ]
+    },
+    {
+      "id": "e8c6b0f8-376d-55bb-9e0b-9d900dba89e3",
+      "category_id": "d31c3bfc-8e56-52f2-b61c-2d28b220318f",
+      "text": "自分の将来について、誰と話し合いたいですか？",
+      "input_type": "single_choice",
+      "question_key": "acp-11",
+      "options": [
+        {
+          "value": "c1",
+          "text": "家族"
+        },
+        {
+          "value": "c2",
+          "text": "友人や信頼できる人"
+        },
+        {
+          "value": "c3",
+          "text": "医療・介護の専門職"
+        },
+        {
+          "value": "c4",
+          "text": "複数の人と話し合いたい"
+        },
+        {
+          "value": "c5",
+          "text": "今は話し合いたくない"
+        }
+      ]
+    },
+    {
+      "id": "48b073ca-c29e-5d7b-b9ca-90a58aa850f5",
+      "category_id": "d31c3bfc-8e56-52f2-b61c-2d28b220318f",
+      "text": "自分の希望を、家族にどの程度伝えていますか？",
+      "input_type": "single_choice",
+      "question_key": "acp-12",
+      "options": [
+        {
+          "value": "c1",
+          "text": "すでに十分に伝えている"
+        },
+        {
+          "value": "c2",
+          "text": "一部だけ伝えている"
+        },
+        {
+          "value": "c3",
+          "text": "これから伝えたい"
+        },
+        {
+          "value": "c4",
+          "text": "まだ話し合えていない"
+        },
+        {
+          "value": "c5",
+          "text": "今は伝えるつもりはない"
+        }
+      ]
+    },
+    {
+      "id": "66a8b058-95e1-5dc8-b971-978055c2e4bd",
+      "category_id": "d31c3bfc-8e56-52f2-b61c-2d28b220318f",
+      "text": "家族に、あらかじめ知っておいてほしいことはありますか？",
+      "input_type": "single_choice",
+      "question_key": "acp-13",
+      "options": [
+        {
+          "value": "c1",
+          "text": "自分が大切にしていること"
+        },
+        {
+          "value": "c2",
+          "text": "将来の生活についての希望"
+        },
+        {
+          "value": "c3",
+          "text": "病気や治療についての考え"
+        },
+        {
+          "value": "c4",
+          "text": "家族への感謝や伝えたい思い"
+        },
+        {
+          "value": "c5",
+          "text": "特にない・まだ分からない"
+        }
+      ]
+    },
+    {
+      "id": "4fb35ed8-3881-5693-b8ce-05f207a74208",
+      "category_id": "d31c3bfc-8e56-52f2-b61c-2d28b220318f",
+      "text": "家族と将来について話し合うとしたら、どの方法がよいですか？",
+      "input_type": "single_choice",
+      "question_key": "acp-14",
+      "options": [
+        {
+          "value": "c1",
+          "text": "普段の会話の中で話したい"
+        },
+        {
+          "value": "c2",
+          "text": "時間を決めてゆっくり話したい"
+        },
+        {
+          "value": "c3",
+          "text": "まずはノートを見てもらいたい"
+        },
+        {
+          "value": "c4",
+          "text": "医療・介護の専門職にも参加してほしい"
+        },
+        {
+          "value": "c5",
+          "text": "まだ考えたくない"
+        }
+      ]
+    },
+    {
+      "id": "c9789243-2c70-5541-89dd-f0b85c800084",
+      "category_id": "21e6f361-b63c-5913-8fe5-c3151146bcde",
+      "text": "病気になったとき、どのようなことを大切にしたいですか？",
+      "input_type": "single_choice",
+      "question_key": "acp-15",
+      "options": [
+        {
+          "value": "c1",
+          "text": "できる限り自分らしい生活を続けること"
+        },
+        {
+          "value": "c2",
+          "text": "家族と一緒に過ごすこと"
+        },
+        {
+          "value": "c3",
+          "text": "痛みや苦しさを和らげること"
+        },
+        {
+          "value": "c4",
+          "text": "できる限り回復を目指すこと"
+        },
+        {
+          "value": "c5",
+          "text": "状況によって考えたい"
+        }
+      ]
+    },
+    {
+      "id": "e55c084f-178b-55b9-99e4-8ab03a2788d9",
+      "category_id": "21e6f361-b63c-5913-8fe5-c3151146bcde",
+      "text": "病気や治療について、どのように説明を受けたいですか？",
+      "input_type": "single_choice",
+      "question_key": "acp-16",
+      "options": [
+        {
+          "value": "c1",
+          "text": "詳しい情報を知りたい"
+        },
+        {
+          "value": "c2",
+          "text": "分かりやすく簡潔に説明してほしい"
+        },
+        {
+          "value": "c3",
+          "text": "家族などにも一緒に説明してほしい"
+        },
+        {
+          "value": "c4",
+          "text": "自分のペースで少しずつ知りたい"
+        },
+        {
+          "value": "c5",
+          "text": "まだ分からない"
+        }
+      ]
+    },
+    {
+      "id": "ad45947d-3121-51ee-a612-8fd7fa1db8a8",
+      "category_id": "21e6f361-b63c-5913-8fe5-c3151146bcde",
+      "text": "自分の希望を伝えられなくなった場合、誰に思いを託したいですか？",
+      "input_type": "single_choice",
+      "question_key": "acp-17",
+      "options": [
+        {
+          "value": "c1",
+          "text": "配偶者やパートナー"
+        },
+        {
+          "value": "c2",
+          "text": "子どもや親族"
+        },
+        {
+          "value": "c3",
+          "text": "信頼できる友人"
+        },
+        {
+          "value": "c4",
+          "text": "医療・介護の専門職と相談して決めたい"
+        },
+        {
+          "value": "c5",
+          "text": "まだ決まっていない"
+        }
+      ]
+    },
+    {
+      "id": "1fdc92e6-e061-52f7-9fb6-f959f9e14178",
+      "category_id": "21e6f361-b63c-5913-8fe5-c3151146bcde",
+      "text": "もしものときの医療について、今の気持ちに近いものはどれですか？",
+      "input_type": "single_choice",
+      "question_key": "acp-18",
+      "options": [
+        {
+          "value": "c1",
+          "text": "自分の希望を今から考えておきたい"
+        },
+        {
+          "value": "c2",
+          "text": "家族と相談して考えたい"
+        },
+        {
+          "value": "c3",
+          "text": "医療従事者から説明を受けて考えたい"
+        },
+        {
+          "value": "c4",
+          "text": "まだ考えがまとまっていない"
+        },
+        {
+          "value": "c5",
+          "text": "今は回答したくない"
+        }
+      ]
+    },
+    {
+      "id": "84a355da-c63e-559d-979a-11dbc785d281",
+      "category_id": "e943ac0e-824e-5706-86fb-6bbf1dfe1228",
+      "text": "緊急時に、誰に連絡してほしいですか？",
+      "input_type": "single_choice",
+      "question_key": "acp-19",
+      "options": [
+        {
+          "value": "c1",
+          "text": "家族"
+        },
+        {
+          "value": "c2",
+          "text": "親族"
+        },
+        {
+          "value": "c3",
+          "text": "信頼できる友人"
+        },
+        {
+          "value": "c4",
+          "text": "登録した連絡先を確認してほしい"
+        },
+        {
+          "value": "c5",
+          "text": "まだ決まっていない"
+        }
+      ]
+    },
+    {
+      "id": "91f57ecc-ed74-52e9-be7f-6325e3f32ff2",
+      "category_id": "e943ac0e-824e-5706-86fb-6bbf1dfe1228",
+      "text": "自分の希望を、誰と共有しておきたいですか？",
+      "input_type": "single_choice",
+      "question_key": "acp-20",
+      "options": [
+        {
+          "value": "c1",
+          "text": "家族だけ"
+        },
+        {
+          "value": "c2",
+          "text": "家族と医療・介護の専門職"
+        },
+        {
+          "value": "c3",
+          "text": "信頼できる人に限定したい"
+        },
+        {
+          "value": "c4",
+          "text": "共有する相手をその都度決めたい"
+        },
+        {
+          "value": "c5",
+          "text": "まだ決まっていない"
+        }
+      ]
+    },
+    {
+      "id": "a4cdfe1d-2ef7-5972-95c7-f35c4cdbea8f",
+      "category_id": "e943ac0e-824e-5706-86fb-6bbf1dfe1228",
+      "text": "私ノートの情報を、医療従事者に見てもらいたいですか？",
+      "input_type": "single_choice",
+      "question_key": "acp-21",
+      "options": [
+        {
+          "value": "c1",
+          "text": "はい、必要な情報を共有したい"
+        },
+        {
+          "value": "c2",
+          "text": "緊急時に限って共有したい"
+        },
+        {
+          "value": "c3",
+          "text": "共有する情報を自分で選びたい"
+        },
+        {
+          "value": "c4",
+          "text": "今は共有したくない"
+        },
+        {
+          "value": "c5",
+          "text": "まだ決まっていない"
+        }
+      ]
+    },
+    {
+      "id": "977a9a3f-401b-5192-8a64-4d799e56167a",
+      "category_id": "cdbe02df-e954-5472-bdf8-d809545b9762",
+      "text": "自分の考えを書いてみましょう",
+      "input_type": "textarea",
+      "question_key": "acp-free",
+      "label": "自由記述",
+      "placeholder": "例：家族と一緒に過ごす時間を大切にしたい",
+      "maxlength": 2000
+    }
+  ]
+}
