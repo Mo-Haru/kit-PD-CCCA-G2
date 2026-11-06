@@ -14,7 +14,7 @@
     <section class="note-access" aria-label="回答の読み込み">
       <p id="status" class="status-message" role="status" aria-live="polite">ログイン状態を確認しています。</p>
       <div class="actions">
-        <a id="login-here" class="demo-launch" href="{{ url_for('auth.index', next=url_for('answers.note')) }}" hidden>ログイン・新規登録</a>
+        <a id="login-here" class="demo-launch" data-auth-link href="{{ url_for('auth.index', next=url_for('answers.note')) }}" hidden>ログイン・新規登録</a>
         <button id="unlock-here" type="button" hidden>回答の暗号化を解除</button>
       </div>
     </section>

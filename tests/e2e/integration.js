@@ -172,6 +172,50 @@ async function lineCallback(body, signature) {
     return { page2: !document.querySelector("#page2").hidden, inPage2: document.querySelector("#page2").contains(target) };
   });
   record(S2, "「書き直す」で回答の画面の、その質問のあるページ（2ページ目）を開く", landed.page2 && landed.inPage2, JSON.stringify(landed));
+  await openNote(A.page);
+  await A.page.locator(".note-item").last().getByRole("link", { name: "書き直す" }).click();
+  await A.page.waitForFunction(() => !document.querySelector("#acp-fields").disabled, null, { timeout: 15000 });
+  await A.page.waitForTimeout(300);
+  const freeLanded = await A.page.evaluate(() => {
+    const target = document.getElementById(decodeURIComponent(location.hash.slice(1)));
+    const box = document.querySelector("#freeText").getBoundingClientRect();
+    return { found: Boolean(target && target.contains(document.querySelector("#freeText"))), top: Math.round(box.top), height: window.innerHeight };
+  });
+  record(S2, "自由記述の「書き直す」で、回答の画面の自由記述の欄を開く",
+    freeLanded.found && freeLanded.top >= 0 && freeLanded.top < freeLanded.height, JSON.stringify(freeLanded));
+
+  // 未ログインで質問を示すURL（#q-…）を開き、画面のログインボタンから戻ると、その質問を開く。
+  const guest = await browser.newContext({ viewport: { width: 420, height: 1400 }, timezoneId: TIMEZONE });
+  const guestPage = await guest.newPage();
+  const questionHash = await A.page.evaluate(() => `#q-${document.querySelectorAll("[data-acp-question]")[10].dataset.questionId}`);
+  await guestPage.goto(`${BASE}/answers${questionHash}`);
+  await guestPage.waitForSelector("#login-here:not([hidden])");
+  await guestPage.waitForTimeout(300);
+  const loginHref = await guestPage.locator("#login-here").getAttribute("href");
+  const loginUrl = new URL(loginHref, BASE);
+  const returned = new URLSearchParams(loginUrl.hash.slice(1)).get("return-fragment");
+  record(S2, "未ログイン時の画面のログインボタンが、質問を示すURLの#以降を引き継ぐ",
+    loginUrl.searchParams.get("next") === "/answers" && `#${returned}` === questionHash, loginHref);
+  const cdp = await guest.newCDPSession(guestPage);
+  await cdp.send("WebAuthn.enable");
+  await cdp.send("WebAuthn.addVirtualAuthenticator", { options: {
+    protocol: "ctap2", ctap2Version: "ctap2_1", transport: "internal", hasResidentKey: true,
+    hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true, hasPrf: true,
+  } });
+  await guestPage.click("#login-here");
+  await guestPage.waitForFunction(() => !document.querySelector("#register-fields").disabled);
+  await guestPage.fill("#display-name", "統合テストB");
+  await guestPage.check("#privacy-consent");
+  await guestPage.click("#register");
+  await guestPage.waitForURL(/\/answers#q-/, { timeout: 20000 }).catch(() => {});
+  await guestPage.waitForFunction(() => !document.querySelector("#acp-fields").disabled, null, { timeout: 15000 }).catch(() => {});
+  const back = await guestPage.evaluate(() => ({
+    url: location.pathname + location.hash,
+    page2: !document.querySelector("#page2").hidden,
+  }));
+  record(S2, "そのボタンから新規登録すると、回答の画面のその質問（2ページ目）に戻る",
+    back.url === `/answers${questionHash}` && back.page2, JSON.stringify(back));
+  await guest.close();
 
   // ── 3. QRで共有（坂担当のQR画像・森下担当の閲覧） ──
   const S3 = "3 QRで共有";

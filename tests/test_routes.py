@@ -120,6 +120,24 @@ def test_note_page_shows_progress_for_every_question(client):
     assert "note-page.mjs" in body
 
 
+def test_every_note_link_points_at_a_question_on_the_answer_page(client):
+    import re
+    note = client.get("/note").get_data(as_text=True)
+    answers = client.get("/answers").get_data(as_text=True)
+    targets = re.findall(r'href="/answers#(q-[0-9a-f-]+)"', note)
+    assert len(targets) == 22
+    for target in targets:
+        assert f'id="{target}"' in answers, target
+
+
+def test_in_page_login_buttons_keep_the_url_fragment(client):
+    # data-auth-link のリンクは、header-session.mjs が #以降（どの質問か）をログイン後へ引き継ぐ。
+    for path in ("/answers", "/note"):
+        body = client.get(path).get_data(as_text=True)
+        button = body[body.index('id="login-here"'):].split(">", 1)[0]
+        assert "data-auth-link" in button, path
+
+
 def test_unimplemented_actions_reject_post(client):
     for path in (*FEATURE_PAGES, "/sharing", "/sharing/new", "/answers/demo", "/auth"):
         response = client.post(path)
