@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { bindSharingPage, expiryBounds } from "../app/static/js/watashi/sharing.mjs";
+import { bindSharingPage } from "../app/static/js/watashi/sharing.mjs";
 
 class Element {
   children = [];
   listeners = {};
   textContent = "";
+  className = "";
   checked = false;
   disabled = false;
   hidden = false;
@@ -13,12 +14,10 @@ class Element {
   open = false;
   attributes = {};
   classList = { toggle() {} };
-  set innerHTML(_) { throw new Error("Answers must be rendered as text"); }
   addEventListener(name, callback) { this.listeners[name] = callback; }
   fire(name, event = {}) { return this.listeners[name](event); }
   append(...items) { this.children.push(...items); }
   replaceChildren(...items) { this.children = items; }
-  removeAttribute(name) { delete this[name]; }
   setAttribute(name, value) { this.attributes[name] = value; }
   focus() { this.focused = true; }
   showModal() { this.open = true; }
@@ -27,294 +26,143 @@ class Element {
     const descendants = this.children.flatMap(child => [child, ...child.querySelectorAll("*")]);
     if (selector === "*") return descendants;
     if (selector === "button") return descendants.filter(child => child.tagName === "BUTTON");
-    return descendants.filter(child => child.tagName === "INPUT" && (!selector.includes(":checked") || child.checked));
+    return descendants.filter(child => child.tagName === "INPUT");
   }
 }
-const ids = ["sharing-page", "share-fields", "status", "unlock-here", "refresh-shares", "confirm-share",
-  "create-qr", "qr-shares", "preview-output", "chapters", "questions", "expires-at", "expiry-field",
-  "qr-output", "share-url", "open-link", "login-here", "lock-state", "show-preview", "link-facts", "copy-link",
-  "sharing-unlock-help", "encrypted-answers", "answer-ciphertext", "all-answers", "share-detail",
-  "share-stop-top", "share-stop-bottom", "share-close-top", "share-close-bottom", "share-detail-status",
-  "share-detail-facts", "share-detail-unlock", "share-detail-cipher", "share-detail-answers", "long-warning",
-  "qr-image", "preview-help"];
-const nodes = Object.fromEntries(ids.map(id => [id, new Element()]));
-const scope = { value: "questions" }, mode = { value: "emergency" };
-const root = {
-  querySelector(selector) {
-    if (selector === "input[name=scope]:checked") return scope;
-    if (selector === "input[name=mode]:checked") return mode;
-    return nodes[selector.slice(1)];
-  },
-  createElement(tag) { const node = new Element(); node.tagName = tag.toUpperCase(); node.ownerDocument = root; return node; },
-  createTextNode(text) { const node = new Element(); node.textContent = text; return node; },
-};
-for (const node of Object.values(nodes)) node.ownerDocument = root;
-let userId = "owner";
-let source = { schema: 1, items: { q1: { state: "answered", value: "<img src=x onerror=alert(1)>" }, q2: { state: "answered", value: "対象外の回答" } } };
-let created = [];
-let stopped = 0;
+const ids = ["sharing-page", "status", "lock-state", "login-here", "share-start", "refresh-shares", "qr-shares",
+  "share-detail", "share-stop", "share-close", "share-detail-status", "share-detail-facts", "share-detail-unlock",
+  "share-detail-cipher", "share-detail-answers", "site-alert", "site-alert-text"];
+const text = element => [element.textContent, ...element.children.map(text)].join("\n");
+
+function setup({ authenticated = true, unlockFails = false } = {}) {
+  const nodes = Object.fromEntries(ids.map(id => [id, new Element()]));
+  const root = {
+    querySelector: selector => nodes[selector.slice(1)],
+    createElement(tag) { const node = new Element(); node.tagName = tag.toUpperCase(); node.ownerDocument = root; return node; },
+    createTextNode(text) { const node = new Element(); node.textContent = text; return node; },
+  };
+  for (const node of Object.values(nodes)) node.ownerDocument = root;
+  const state = { unlocked: false, unlockCalls: 0, allowUnlock: !unlockFails, userId: "owner", stopped: 0, ownerCopies: 0,
+    shares: [{ id: "share0", status: "active", mode: "emergency", created_at: "2026-11-06", expires_at: null,
+      current_version: 1, version: { ciphertext: "Shared-fixture-ciphertext" } }] };
+  const client = {
+    getUnlockState: () => ({ unlocked: state.unlocked }),
+    async unlock() {
+      state.unlockCalls += 1;
+      if (!state.allowUnlock) throw Object.assign(new Error("cancel"), { name: "NotAllowedError" });
+      state.unlocked = true;
+    },
+    async api(path) {
+      if (path.endsWith("/auth/session")) return authenticated ? { authenticated: true, user_id: state.userId, display_name: "テスト" } : { authenticated: false };
+      if (path.endsWith("/answers/questions")) return { categories: [{ id: "c1", name: "章" }],
+        questions: [{ id: "q1", category_id: "c1", text: "質問1" }] };
+      if (path.endsWith("/stop")) {
+        state.stopped += 1;
+        state.shares.find(share => path.includes(`/${share.id}/`)).status = "stopped";
+        return {};
+      }
+      if (path.endsWith("/qr-shares")) return { shares: state.shares };
+      if (path.includes("/qr-shares/")) return { share: state.shares.find(share => path.endsWith(`/${share.id}`)) };
+      throw new Error(`Unexpected API: ${path}`);
+    },
+    async openOwnedQrShare(share) {
+      state.ownerCopies += 1;
+      if (share.id === "legacy") throw Object.assign(new Error("旧形式のため控えがありません"), { code: "owner_copy_unavailable" });
+      return { schema: 1, items: { q1: { state: "answered", value: "<img src=x onerror=alert(1)>" } } };
+    },
+  };
+  return { nodes, state, bind: () => bindSharingPage(root, client) };
+}
+const navigations = [];
+globalThis.location = { assign(path) { navigations.push(path); } };
 let confirmStop = false;
 const stopPrompts = [];
 globalThis.confirm = message => { stopPrompts.push(message); return confirmStop; };
-let failCreate = false;
-let unlocked = false;
-let unlockFailure = false;
-let decryptFailure = false;
-let reauthFailure = false;
-const issued = [];
-const rendered = [];
-let suspendLoad = null;
-let finishLoad;
-const client = {
-  getUnlockState: () => ({ unlocked }),
-  async unlock() {
-    if (unlockFailure) throw Object.assign(new Error("cancel"), { name: "NotAllowedError" });
-    unlocked = true;
-  },
-  async api(path) {
-    if (path.endsWith("/auth/session")) return { authenticated: true, user_id: userId, display_name: "テスト" };
-    if (path.endsWith("/answers/questions")) return { categories: [{ id: "c1", name: "章" }], questions: [
-      { id: "q1", category_id: "c1", text: "質問1" }, { id: "q2", category_id: "c1", text: "質問2" },
-    ] };
-    if (path.endsWith("/answers/current")) return { revision: 1, document: { ciphertext: "Encrypted-document-fixture-ciphertext" } };
-    if (path.endsWith("/stop")) {
-      stopped++;
-      issued.find(share => path.includes(`/${share.id}/`)).status = "stopped";
-      return {};
-    }
-    if (path.endsWith("/qr-shares")) return { shares: issued };
-    if (path.includes("/qr-shares/")) return { share: issued.find(share => path.endsWith(`/${share.id}`)) };
-    throw new Error(`Unexpected API: ${path}`);
-  },
-  async loadAnswerDocument() {
-    if (decryptFailure) throw new Error("復号失敗のテスト");
-    if (suspendLoad) await suspendLoad;
-    return { revision: 1, document: structuredClone(source) };
-  },
-  async createQrShare(options) {
-    if (failCreate) throw new Error("保存失敗のテスト");
-    if (reauthFailure) throw Object.assign(new Error("再認証"), { code: "reauth_required" });
-    created.push(structuredClone(options));
-    const share = { id: `share${created.length - 1}`, status: "active", mode: options.mode,
-      created_at: "2026-10-26", current_version: 1, version: { ciphertext: "Shared-fixture-ciphertext" } };
-    issued.push(share);
-    return { url: "http://localhost/view/test#fixture-only", share };
-  },
-  renderQr(url, options) {
-    rendered.push({ url, doc: options.doc });
-    const image = new Element();
-    image.tagName = "CANVAS";
-    image.qrUrl = url;
-    return image;
-  },
-  async openOwnedQrShare(share) {
-    if (share.id === "legacy") throw Object.assign(new Error("旧形式のため控えがありません"), { code: "owner_copy_unavailable" });
-    return structuredClone(created[Number(share.id.replace("share", ""))].payload);
-  },
-};
-const text = element => [element.textContent, ...element.children.map(text)].join("\n");
-nodes["qr-output"].hidden = true;
-await bindSharingPage(root, client);
-assert.equal(nodes["share-fields"].disabled, false);
-assert.equal(nodes["unlock-here"].dataset.unlockState, "locked");
-assert.equal(nodes["unlock-here"].textContent, "回答の暗号化を解除");
-assert.equal(nodes["show-preview"].disabled, true);
-assert.ok(text(nodes.questions).includes("Encrypted-document"));
-assert.ok(!text(nodes.questions).includes("<img"));
-const choices = nodes.questions.querySelectorAll("input");
-choices[0].checked = true;
-unlockFailure = true;
-await nodes["unlock-here"].fire("click");
-assert.equal(nodes["unlock-here"].dataset.unlockState, "locked");
-unlockFailure = false;
-decryptFailure = true;
-await nodes["unlock-here"].fire("click");
-assert.equal(nodes["unlock-here"].dataset.unlockState, "locked");
-assert.ok(!text(nodes.questions).includes("<img"));
-decryptFailure = false;
-await nodes["unlock-here"].fire("click");
-assert.equal(nodes["unlock-here"].textContent, "解除済み");
-assert.equal(nodes["unlock-here"].dataset.unlockState, "unlocked");
-assert.equal(nodes["unlock-here"].disabled, true);
-assert.ok(!text(nodes.questions).includes("Encrypted-document"));
-assert.ok(text(nodes.questions).includes("<img src=x onerror=alert(1)>"));
-assert.equal(choices[0].checked, true);
-assert.equal(nodes["show-preview"].disabled, false);
-assert.equal(nodes["create-qr"].disabled, true);
-// Empty selection never creates a share.
-choices[0].checked = false;
-await nodes["share-fields"].fire("change", { target: choices[0] });
-assert.equal(nodes["show-preview"].disabled, true);
-assert.equal(nodes["preview-help"].hidden, false);
-assert.ok(nodes["preview-help"].textContent.includes("質問を1つ以上"));
-await nodes["show-preview"].fire("click");
-assert.equal(nodes["confirm-share"].disabled, true);
-assert.equal(created.length, 0);
-choices[0].checked = true;
-await nodes["share-fields"].fire("change", { target: choices[0] });
-assert.equal(nodes["show-preview"].disabled, false);
-assert.equal(nodes["preview-help"].hidden, true);
-await nodes["show-preview"].fire("click");
-const previewAnswers = nodes["preview-output"].children[1].children;
-assert.equal(previewAnswers.length, 1);
-assert.ok(text(previewAnswers[0]).includes("<img src=x onerror=alert(1)>"));
-// 質問ごとに、1つの枠（質問の文と回答）で表示する。
-assert.ok(text(previewAnswers[0]).includes("質問1"));
-assert.ok(previewAnswers[0].className.includes("answer-item"));
-// Expiry/mode changes invalidate confirmation, including when changed programmatically.
-nodes["confirm-share"].checked = true;
-nodes["share-fields"].fire("change", { target: nodes["confirm-share"] });
-assert.equal(nodes["create-qr"].disabled, false);
-mode.value = "timed";
-nodes["expires-at"].value = new Date(Date.now() + 3600000).toISOString();
-await nodes["create-qr"].fire("click");
-assert.equal(created.length, 0);
-assert.equal(nodes["confirm-share"].checked, false);
-// Invalid expiry keeps preview unavailable until a valid future date is entered.
-nodes["expires-at"].value = new Date(Date.now() - 3600000).toISOString();
-await nodes["expires-at"].fire("input");
-assert.equal(nodes["show-preview"].disabled, true);
-assert.ok(nodes["preview-help"].textContent.includes("31日以内"));
-// 日付だけ入れて時刻が空のときは、value が空になり、理由を表示する。
-nodes["expires-at"].value = "";
-nodes["expires-at"].validity = { badInput: true };
-await nodes["expires-at"].fire("input");
-assert.equal(nodes["show-preview"].disabled, true);
-assert.ok(nodes["preview-help"].textContent.includes("日付と時刻"));
-delete nodes["expires-at"].validity;
-nodes["expires-at"].value = new Date(Date.now() + 3600000).toISOString();
-await nodes["expires-at"].fire("input");
-assert.equal(nodes["show-preview"].disabled, false);
-mode.value = "emergency";
-await nodes["show-preview"].fire("click");
-nodes["confirm-share"].checked = true;
-failCreate = true;
-await nodes["create-qr"].fire("click");
-assert.equal(nodes["qr-output"].hidden, true);
-assert.ok(nodes.status.textContent.includes("保存失敗"));
-// 作成に失敗したらQRは描かない。
-assert.equal(rendered.length, 0);
-assert.equal(nodes["qr-image"].children.length, 0);
-// A later answer edit cannot replace the content the sender confirmed.
-failCreate = false;
-source.items.q1.value = "確認後に更新された回答";
-await nodes["create-qr"].fire("click");
-assert.equal(created.length, 1);
-assert.equal(created[0].payload.items.q1.value, "<img src=x onerror=alert(1)>");
-assert.ok(!Object.hasOwn(created[0].payload.items, "q2"));
-assert.equal(nodes["qr-output"].hidden, false);
-assert.equal(nodes["confirm-share"].checked, false);
-// QRにするのは作成で返ったURLだけ。画像はこのページの中で描く。
-assert.deepEqual(rendered.map(item => item.url), ["http://localhost/view/test#fixture-only"]);
-assert.equal(rendered[0].doc, root);
-assert.equal(nodes["qr-image"].children.length, 1);
-assert.equal(nodes["qr-image"].children[0].qrUrl, nodes["share-url"].value);
-assert.ok(nodes.status.textContent.includes("QRコード"));
-const opener = nodes["qr-shares"].querySelectorAll("button")[0];
-assert.equal(opener.dataset.shareState, "active");
-assert.equal(opener.children[1].textContent, "開く");
-assert.ok(text(opener.children[0]).includes("発行 2026-10-26"));
-assert.equal(opener.querySelectorAll("button").length, 0);
-await opener.fire("click");
-assert.equal(nodes["share-detail"].open, true);
-assert.ok(text(nodes["share-detail-answers"]).includes("<img src=x onerror=alert(1)>"));
-assert.ok(!text(nodes["share-detail-answers"]).includes("確認後に更新された回答"));
-assert.equal(nodes["share-stop-top"].disabled, false);
-assert.equal(nodes["share-stop-bottom"].disabled, false);
-await nodes["share-stop-bottom"].fire("click");
-assert.equal(stopped, 0);
-assert.ok(stopPrompts[0].includes("この共有を停止しますか"));
-assert.equal(nodes["share-stop-top"].disabled, false);
-assert.equal(nodes["qr-shares"].querySelectorAll("button")[0].dataset.shareState, "active");
-confirmStop = true;
-await nodes["share-stop-bottom"].fire("click");
-assert.equal(stopped, 1);
-assert.equal(nodes["qr-shares"].querySelectorAll("button")[0].dataset.shareState, "stopped");
-assert.equal(nodes["share-stop-top"].disabled, true);
-assert.equal(nodes["share-stop-bottom"].textContent, "共有停止済み");
-nodes["share-close-bottom"].fire("click");
-assert.equal(nodes["share-detail"].open, false);
-assert.equal(nodes["share-detail-answers"].children.length, 0);
-assert.equal(opener.focused, true);
-// Long links show a strong warning, default to three years, and never go past it.
-assert.equal(nodes["long-warning"].hidden, true);
-// 期限が空のまま長期へ切り替えても、既定の期限ですぐに内容を確認できる。
-nodes["expires-at"].value = "";
-mode.value = "long";
-nodes["share-fields"].fire("change", { target: mode });
-assert.equal(nodes["long-warning"].hidden, false);
-assert.equal(nodes["expiry-field"].hidden, false);
-assert.equal(nodes["show-preview"].disabled, false);
-assert.equal(nodes["preview-help"].hidden, true);
-assert.ok(nodes["expires-at"].value >= nodes["expires-at"].min && nodes["expires-at"].value <= nodes["expires-at"].max);
-const longDefault = new Date(nodes["expires-at"].value);
-const threeYears = new Date();
-threeYears.setFullYear(threeYears.getFullYear() + 3);
-assert.ok(Math.abs(longDefault - threeYears) < 120000, nodes["expires-at"].value);
-const savedDefault = nodes["expires-at"].value;
-nodes["expires-at"].value = new Date(Date.now() + 1100 * 86400000).toISOString();
-await nodes["expires-at"].fire("input");
-assert.equal(nodes["show-preview"].disabled, true);
-nodes["expires-at"].value = savedDefault;
-await nodes["expires-at"].fire("input");
-assert.equal(nodes["show-preview"].disabled, false);
-await nodes["show-preview"].fire("click");
-assert.ok(text(nodes["preview-output"]).includes("長期（最長3年）"));
-assert.ok(text(nodes["preview-output"]).includes("誰でも何回でも閲覧できます"));
-nodes["confirm-share"].checked = true;
-await nodes["create-qr"].fire("click");
-assert.equal(created[1].mode, "long");
-assert.equal(new Date(created[1].expiresAt).getTime(), longDefault.getTime());
-await nodes["qr-shares"].querySelectorAll("button")[1].fire("click");
-confirmStop = false;
-await nodes["share-stop-top"].fire("click");
-assert.equal(stopped, 1);
-confirmStop = true;
-await nodes["share-stop-top"].fire("click");
-assert.equal(stopped, 2);
-nodes["share-close-top"].fire("click");
-assert.equal(nodes["share-detail"].open, false);
-issued.push({ ...issued[0], id: "legacy", status: "expired" });
-await nodes["refresh-shares"].fire("click");
-assert.equal(nodes["qr-shares"].querySelectorAll("button")[2].dataset.shareState, "expired");
-await nodes["qr-shares"].querySelectorAll("button")[2].fire("click");
-assert.ok(nodes["share-detail-status"].textContent.includes("旧形式"));
-let cancelled = false;
-nodes["share-detail"].fire("cancel", { preventDefault() { cancelled = true; } });
-assert.ok(cancelled);
-assert.equal(nodes["share-detail"].open, false);
-// A late preview response cannot reinstate confirmation after settings change.
-suspendLoad = new Promise(resolve => { finishLoad = resolve; });
-const loading = nodes["show-preview"].fire("click");
-await Promise.resolve(); await Promise.resolve();
-nodes["share-fields"].fire("change", { target: choices[0] });
-finishLoad();
-await loading;
-assert.equal(nodes["confirm-share"].disabled, true);
-suspendLoad = null;
-await nodes["show-preview"].fire("click");
-nodes["confirm-share"].checked = true;
-reauthFailure = true;
-await nodes["create-qr"].fire("click");
-assert.equal(nodes["unlock-here"].dataset.unlockState, "locked");
-assert.ok(!text(nodes.questions).includes("確認後に更新された回答"));
-assert.equal(choices[0].checked, true);
-reauthFailure = false;
-await nodes["unlock-here"].fire("click");
-assert.equal(nodes["unlock-here"].dataset.unlockState, "unlocked");
-// Switching accounts removes secrets and locks this page.
-userId = "other-owner";
-await nodes["refresh-shares"].fire("click");
-assert.equal(nodes["share-fields"].disabled, true);
-assert.equal(nodes["share-url"].value, "");
-assert.equal(nodes["qr-output"].hidden, true);
-assert.equal(nodes["qr-image"].children.length, 0);
-assert.ok(nodes["qr-shares"].querySelectorAll("button").every(button => button.disabled));
-// 選べる範囲は、範囲の端を選んでも上限の確認に通る。
-const fixedNow = new Date(2026, 9, 30, 12, 0, 30);
-const timedBounds = expiryBounds("timed", fixedNow);
-assert.equal(timedBounds.min, "2026-10-30T12:01");
-assert.equal(timedBounds.max, "2026-11-30T12:00");
-assert.ok(new Date(timedBounds.max) <= new Date(fixedNow.getTime() + 31 * 86400000));
-assert.ok(new Date(timedBounds.min) > fixedNow);
+
+// --- 一覧と、共有を始めるボタン ---
+{
+  const { nodes, state, bind } = setup();
+  await bind();
+  assert.equal(nodes["share-start"].disabled, false);
+  assert.equal(nodes["login-here"].hidden, true);
+  assert.ok(nodes["lock-state"].textContent.includes("パスキーで本人確認"));
+  await nodes["share-start"].fire("click");
+  assert.equal(navigations.at(-1), "/sharing/new", "共有を作る手順は、別の画面で行う");
+  const opener = nodes["qr-shares"].querySelectorAll("button")[0];
+  assert.equal(opener.dataset.shareState, "active");
+  assert.equal(opener.children[1].textContent, "開く");
+  assert.ok(text(opener.children[0]).includes("発行 2026-11-06"));
+  assert.equal(state.unlockCalls, 0, "開くまで、本人確認を求めない");
+
+  // 開くと、その場でパスキーの本人確認を求める。取り消したら内容を出さず、続ける手段を出す。
+  state.allowUnlock = false;
+  await opener.fire("click");
+  assert.equal(nodes["share-detail"].open, true);
+  assert.equal(state.unlockCalls, 1);
+  assert.equal(state.ownerCopies, 0, "取り消したら、回答を復号しない");
+  assert.ok(nodes["share-detail-status"].textContent.includes("本人確認を完了できませんでした"));
+  assert.equal(nodes["share-detail-unlock"].hidden, false);
+  assert.equal(nodes["share-detail-cipher"].hidden, false);
+  assert.equal(nodes["share-detail-answers"].children.length, 0);
+  state.allowUnlock = true;
+  await nodes["share-detail-unlock"].fire("click");
+  assert.equal(state.unlockCalls, 2);
+  assert.equal(nodes["share-detail-unlock"].hidden, true);
+  assert.ok(text(nodes["share-detail-answers"]).includes("<img src=x onerror=alert(1)>"), "回答は文字として表示する");
+  assert.ok(nodes["share-detail-answers"].children[0].className.includes("answer-item"), "質問ごとの枠で表示する");
+  assert.equal(nodes["share-stop"].disabled, false);
+
+  // 停止は右上のボタン。確認してから停止する。
+  await nodes["share-stop"].fire("click");
+  assert.equal(state.stopped, 0);
+  assert.ok(stopPrompts.at(-1).includes("この共有を停止しますか"));
+  confirmStop = true;
+  await nodes["share-stop"].fire("click");
+  assert.equal(state.stopped, 1);
+  assert.equal(nodes["qr-shares"].querySelectorAll("button")[0].dataset.shareState, "stopped");
+  assert.equal(nodes["share-stop"].disabled, true);
+  assert.equal(nodes["share-stop"].textContent, "共有停止済み");
+  nodes["share-close"].fire("click");
+  assert.equal(nodes["share-detail"].open, false);
+  assert.equal(nodes["share-detail-answers"].children.length, 0);
+  assert.equal(opener.focused, true);
+
+  // 2回目以降は、解除済みなので、本人確認を求めない。
+  const calls = state.unlockCalls;
+  await nodes["qr-shares"].querySelectorAll("button")[0].fire("click");
+  assert.equal(state.unlockCalls, calls);
+  nodes["share-close"].fire("click");
+
+  // 旧形式の共有（控えがない）
+  state.shares.push({ ...state.shares[0], id: "legacy", status: "expired" });
+  await nodes["refresh-shares"].fire("click");
+  await nodes["qr-shares"].querySelectorAll("button")[1].fire("click");
+  assert.ok(nodes["share-detail-status"].textContent.includes("旧形式"));
+  let cancelled = false;
+  nodes["share-detail"].fire("cancel", { preventDefault() { cancelled = true; } });
+  assert.ok(cancelled);
+  assert.equal(nodes["share-detail"].open, false);
+
+  // アカウントが変わったら、一覧を消して操作できなくする。
+  state.userId = "other-owner";
+  await nodes["refresh-shares"].fire("click");
+  assert.equal(nodes["share-start"].disabled, true);
+  assert.equal(nodes["qr-shares"].children.length, 0);
+  assert.ok(nodes["lock-state"].textContent.includes("アカウントが変わりました"));
+}
+
+// --- 発行済みがない／ログインしていない ---
+{
+  const { nodes, state, bind } = setup();
+  state.shares = [];
+  await bind();
+  assert.ok(text(nodes["qr-shares"]).includes("発行済みの共有はありません"));
+}
+{
+  const { nodes, bind } = setup({ authenticated: false });
+  await bind();
+  assert.equal(nodes["login-here"].hidden, false);
+  assert.equal(nodes["share-start"].disabled, true);
+  assert.equal(nodes["refresh-shares"].disabled, true);
+}
 console.log("Sharing page interactions passed");

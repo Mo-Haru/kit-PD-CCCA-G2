@@ -1,5 +1,6 @@
 import { bytesToB64url, randomBytes } from "./bytes.mjs";
 import { api } from "./client.mjs";
+import { notify } from "./site-alert.mjs";
 import {
   clearQrSecrets,
   entriesFromPayload,
@@ -166,8 +167,8 @@ export function bindQrViewPage(root, {
     },
   };
 
-  function show(text) {
-    status.textContent = text;
+  function show(text, error = false) {
+    notify(root, status, text, error);
   }
 
   async function endOnServer() {
@@ -219,7 +220,7 @@ export function bindQrViewPage(root, {
         return;
       }
       output.replaceChildren();
-      show(describeViewError(error));
+      show(describeViewError(error), true);
     } finally {
       if (isCurrent(ticket)) {
         busy = false;
@@ -233,7 +234,7 @@ export function bindQrViewPage(root, {
   loadQrPage({ api: call, storage, shareId, secrets }).then(async (plan) => {
     if (!isCurrent(initialTicket)) return;
     if (plan.action === "missing") {
-      show("閲覧に必要な情報がこの端末にありません。QRのリンクをこの端末で開いてください。");
+      show("閲覧に必要な情報がこの端末にありません。QRのリンクをこの端末で開いてください。", true);
       return;
     }
     if (plan.action === "resume") {
@@ -242,13 +243,13 @@ export function bindQrViewPage(root, {
       } catch (error) {
         if (!isCurrent(initialTicket)) return;
         output.replaceChildren();
-        show(describeViewError(error));
+        show(describeViewError(error), true);
       }
       return;
     }
-    show(plan.error ? describeViewError(plan.error) : "内容を開くを押すまで、閲覧は開始しません。");
+    show(plan.error ? describeViewError(plan.error) : "内容を開くを押すまで、閲覧は開始しません。", Boolean(plan.error));
   }).catch((error) => {
-    if (isCurrent(initialTicket)) show(describeViewError(error));
+    if (isCurrent(initialTicket)) show(describeViewError(error), true);
   });
 
   node("open").addEventListener("click", () => {
@@ -260,7 +261,7 @@ export function bindQrViewPage(root, {
     if (busy || ended) return;
     const next = replaceAttempt(storage, shareId);
     if (!next) {
-      show("閲覧に必要な情報がこの端末にありません。");
+      show("閲覧に必要な情報がこの端末にありません。", true);
       return;
     }
     return openExplicit(next);

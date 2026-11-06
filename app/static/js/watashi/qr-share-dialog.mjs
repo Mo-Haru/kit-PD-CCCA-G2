@@ -7,14 +7,12 @@ export function bindQrShareDialog(root, { client, readSession, canDecrypt, unloc
   let sequence = 0;
   let busy = false;
   let trigger = null;
-  const stops = [node("share-stop-top"), node("share-stop-bottom")];
+  const stop = node("share-stop");
   const states = { active: "有効", stopped: "停止済み", expired: "期限切れ", used: "使用済み" };
 
   function sync() {
-    for (const stop of stops) {
-      stop.disabled = busy || !share || share.status === "stopped";
-      stop.textContent = share?.status === "stopped" ? "共有停止済み" : "共有停止";
-    }
+    stop.disabled = busy || !share || share.status === "stopped";
+    stop.textContent = share?.status === "stopped" ? "共有停止済み" : "共有停止";
     node("share-detail-unlock").disabled = busy;
   }
   function message(text) { node("share-detail-status").textContent = text; }
@@ -22,12 +20,21 @@ export function bindQrShareDialog(root, { client, readSession, canDecrypt, unloc
     node("share-detail-answers").replaceChildren();
     node("share-detail-cipher").hidden = true;
     node("share-detail-cipher").textContent = "";
-    node("share-detail-unlock").hidden = canDecrypt();
+    node("share-detail-unlock").hidden = true;
     if (!canDecrypt()) {
-      node("share-detail-cipher").textContent = `${share.version.ciphertext.slice(0, 128)}…`;
-      node("share-detail-cipher").hidden = false;
-      message("共有した回答は暗号化されています。解除すると内容を表示できます。");
-      return;
+      // 暗号化された回答を開くので、ここでパスキーの本人確認を求める。
+      message("暗号化された回答を開くため、パスキーで本人確認をします…");
+      try { await unlockAnswers(); }
+      catch (error) {
+        if (ticket !== sequence || !dialog.open) return;
+        node("share-detail-cipher").textContent = `${share.version.ciphertext.slice(0, 128)}…`;
+        node("share-detail-cipher").hidden = false;
+        node("share-detail-unlock").hidden = false;
+        message(["NotAllowedError", "AbortError"].includes(error.name)
+          ? "本人確認を完了できませんでした。もう一度お試しください。" : error.message || "本人確認を完了できませんでした。");
+        return;
+      }
+      if (ticket !== sequence || !dialog.open) return;
     }
     try {
       const payload = await client.openOwnedQrShare(share);
@@ -81,14 +88,14 @@ export function bindQrShareDialog(root, { client, readSession, canDecrypt, unloc
     else trigger?.focus();
     trigger = null;
   }
-  for (const id of ["share-close-top", "share-close-bottom"]) node(id).addEventListener("click", close);
+  node("share-close").addEventListener("click", close);
   dialog.addEventListener("cancel", event => { event.preventDefault(); close(); });
   dialog.addEventListener("close", () => {
     sequence += 1;
     node("share-detail-answers").replaceChildren();
     node("share-detail-cipher").textContent = "";
   });
-  for (const stop of stops) stop.addEventListener("click", () => act(async () => {
+  stop.addEventListener("click", () => act(async () => {
     if (!share || share.status === "stopped") return;
     if (!globalThis.confirm("この共有を停止しますか？\n停止すると、このリンクから回答を閲覧できなくなります。相手が保存済みの回答は削除されません。")) return;
     const id = share.id;

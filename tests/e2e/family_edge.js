@@ -289,16 +289,16 @@ async function cards(page, list) {
     !lateBody.includes("ダミー回答") && !(await B.page.locator("#family-detail").evaluate(node => node.open)));
   await B.page.unroute("**/api/v1/family/received/*");
   // (b) QR閲覧：開始の通信が遅いあいだに「閲覧を終了」を押す。
-  await A.page.goto(`${BASE}/sharing`);
-  await A.page.waitForFunction(() => !document.querySelector("#unlock-here").disabled);
-  await A.page.click("#unlock-here");
-  await A.page.waitForFunction(() => document.querySelector("#unlock-here").dataset.unlockState === "unlocked");
+  // 共有リンクは /sharing/new の手順（解除 → 範囲 → 種類と期限 → 再確認）で作る。開くと自動で解除が始まる。
+  await A.page.goto(`${BASE}/sharing/new`);
+  await A.page.waitForFunction(() => !document.querySelector("#step-select").hidden);
   await A.page.check("input[name=scope][value=all]");
+  await A.page.click("#step-next");
   await A.page.check("input[name=mode][value=timed]");
   await A.page.dispatchEvent("input[name=mode][value=timed]", "change");
   await A.page.fill("#expires-at", localInMinutes(60));
-  await A.page.click("#show-preview");
-  await A.page.waitForFunction(() => !document.querySelector("#confirm-share").disabled);
+  await A.page.click("#step-next");
+  await A.page.waitForSelector("#step-confirm:not([hidden])");
   await A.page.check("#confirm-share");
   await A.page.dispatchEvent("#confirm-share", "change");
   await A.page.click("#create-qr");

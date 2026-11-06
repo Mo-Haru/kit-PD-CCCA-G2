@@ -150,7 +150,7 @@ pytest は Node.js も使います。`tests/browser_crypto.mjs` と `tests/page_
 | http://localhost:5000/hello | 本文が `Hello, World!` |
 | http://localhost:5000/answers | 回答入力は「未実装」。保存APIは別で、`docs/morishita.md` の契約を使う |
 | http://localhost:5000/answers/demo | ダミー質問6問。パスキーで解錠し、暗号化保存・再読み込み・共有を試せる |
-| http://localhost:5000/sharing | 共有範囲を確認してリンクとQRコードを作成・停止できる |
+| http://localhost:5000/sharing | 発行済みの共有の一覧。「共有を開始」から `/sharing/new` へ進み、鍵の解除 → 内容 → 種類と期限 → 再確認 → 確定の順でリンクとQRコードを作れる。共有内容のモーダルから停止できる |
 | http://localhost:5000/auth | パスキーの登録、ログイン、鍵の解除ができる |
 | http://localhost:5000/family | 家族の一覧と、共有したもの・共有されたものを見られる。「共有を開始」から `/family/share` へ進み、鍵の解除 → 内容 → 家族と期限 → 再確認 → 確定の順で共有を作れる |
 | http://localhost:5000/transfer | この画面でログインし、鍵を解除してから端末移行を進められる |

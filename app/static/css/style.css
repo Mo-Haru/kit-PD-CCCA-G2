@@ -254,9 +254,76 @@ nav a[aria-current="page"] {
   grid-template-rows: minmax(0, 1fr);
 }
 
+/* ページ本文の枠の上に、エラー表示の枠を置く縦の並び。 */
+.site-column {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.site-alert {
+  display: flex;
+  flex-shrink: 0;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 8px 12px 16px;
+  border: 1px solid var(--md-sys-color-error);
+  border-radius: var(--md-sys-shape-corner-large);
+  background: var(--md-sys-color-error-container);
+  color: var(--md-sys-color-on-error-container);
+}
+
+.site-alert[hidden] {
+  display: none;
+}
+
+.site-alert-mark {
+  flex-shrink: 0;
+  line-height: 1.5;
+}
+
+.site-alert-text {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-weight: 500;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.site-alert-close {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  min-height: 0;
+  margin: -4px 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--md-sys-shape-corner-full);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.site-alert-close:hover {
+  background: rgb(0 0 0 / 8%);
+}
+
+.site-alert-icon {
+  width: 20px;
+  height: 20px;
+  pointer-events: none;
+}
+
 .site-content {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   border-radius: var(--md-sys-shape-corner-extra-large);

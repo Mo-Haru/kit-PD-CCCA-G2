@@ -9,6 +9,7 @@ if (toggle && menu && layout && closeButton && backdrop) {
   const background = [
     document.querySelector(".skip"),
     document.querySelector("#site-header"),
+    document.querySelector("#site-alert"),
     document.querySelector("#site-content"),
   ].filter(Boolean);
   // 広い画面の開閉は、ページを移動しても保つ。保存できない環境では、開いた状態から始める。

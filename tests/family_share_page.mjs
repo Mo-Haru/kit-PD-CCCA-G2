@@ -27,7 +27,8 @@ class Element {
 
 const ids = ["family-share-page", "share-steps", "lock-state", "status", "step-unlock", "step-select", "step-target",
   "step-confirm", "step-done", "login-here", "unlock-here", "chapters", "questions", "all-answers", "no-family",
-  "connection", "expires-at", "expires-unlimited", "preview-output", "confirm-share", "done-text", "step-back", "step-next", "share", "share-title"];
+  "connection", "expires-at", "expires-unlimited", "preview-output", "confirm-share", "done-text", "step-back", "step-next", "share", "share-title",
+  "site-alert", "site-alert-text"];
 
 function setup({ updateId = null, authenticated = true, unlockFails = false } = {}) {
   const nodes = Object.fromEntries(ids.map(id => [id, new Element()]));
@@ -171,7 +172,7 @@ const click = (nodes, id) => nodes[id].fire("click");
   await click(nodes, "share");
   assert.equal(state.created.length, 0);
   assert.deepEqual(visibleSteps(nodes), ["target"]);
-  assert.ok(nodes.status.textContent.includes("もう一度確認"));
+  assert.ok(nodes["site-alert-text"].textContent.includes("もう一度確認"));
   assert.equal(nodes["confirm-share"].checked, false);
   await click(nodes, "step-next");
   assert.ok(text(nodes["preview-output"]).includes("鍵：key-B"));
@@ -213,7 +214,7 @@ const click = (nodes, id) => nodes[id].fire("click");
   assert.equal(state.created.length, 0);
   assert.deepEqual(visibleSteps(nodes), ["unlock"], "本人確認が切れたら、最初のロック解除に戻る");
   assert.equal(nodes["unlock-here"].disabled, false);
-  assert.ok(nodes.status.textContent.includes("もう一度解除"));
+  assert.ok(nodes["site-alert-text"].textContent.includes("もう一度解除"));
   assert.equal(nodes["preview-output"].children.length, 0);
   await pick(nodes, scopes, "all");
   assert.equal(nodes["all-answers"].hidden, false);
@@ -225,7 +226,7 @@ const click = (nodes, id) => nodes[id].fire("click");
   await bind();
   assert.equal(state.unlockCalls, 1);
   assert.deepEqual(visibleSteps(nodes), ["unlock"]);
-  assert.ok(nodes.status.textContent.includes("もう一度"));
+  assert.ok(nodes["site-alert-text"].textContent.includes("もう一度"));
   assert.equal(nodes["unlock-here"].disabled, false);
   assert.equal(nodes["step-next"].disabled, true);
   state.allowUnlock = true;
@@ -283,7 +284,7 @@ for (const shares of [[], [{ id: "share-1", status: "stopped", connection_id: "c
   const { nodes, state, bind } = setup({ updateId: "share-1" });
   state.shares = shares;
   await bind();
-  assert.ok(nodes.status.textContent.includes("更新する共有が見つかりません"));
+  assert.ok(nodes["site-alert-text"].textContent.includes("更新する共有が見つかりません"));
   assert.equal(state.unlockCalls, 0, "更新できない共有では、解除を始めない");
   await click(nodes, "unlock-here");
   assert.equal(nodes["step-next"].disabled, true, "更新できない共有では、解除しても先へ進めない");

@@ -12,3 +12,8 @@ bp = Blueprint("sharing", __name__)
 @bp.get("/sharing", strict_slashes=False)
 def index():
     return render_template("sharing/index.html")
+
+
+@bp.get("/sharing/new", strict_slashes=False)
+def new():
+    return render_template("sharing/new.html")

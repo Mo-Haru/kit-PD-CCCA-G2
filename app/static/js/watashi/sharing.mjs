@@ -1,200 +1,37 @@
-import { api, createQrShare, getUnlockState, loadAnswerDocument, openOwnedQrShare, unlock } from "./client.mjs";
-import { entriesFromPayload, fillAnswerList, plaintextForSelection, presentAnswer } from "./crypto.mjs";
+import { notify } from "./site-alert.mjs";
+import { api, getUnlockState, openOwnedQrShare, unlock } from "./client.mjs";
 import { bindQrShareDialog } from "./qr-share-dialog.mjs";
-import { renderQrCanvas } from "./qrShareView.mjs";
+import { modeLabel } from "./sharing-flow.mjs";
 
-const modeLabel = mode => ({ emergency: "緊急用（最初の閲覧のみ）", timed: "期限付き", long: "長期（最長3年）" }[mode] || mode);
-// サーバーの上限（QR_TIMED_MAX_SECONDS / QR_LONG_MAX_SECONDS）と同じ日数。
-const MAX_DAYS = { timed: 31, long: 1096 };
-
-// datetime-local に入れる形（端末の時刻、分まで）。
-function localInputValue(date) {
-  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-}
-
-export function longExpiryDefault(now = new Date()) {
-  const date = new Date(now.getTime());
-  date.setFullYear(date.getFullYear() + 3);
-  date.setSeconds(0, 0);
-  return localInputValue(date);
-}
-
-// 期限として選べる範囲。下限は次の分、上限は切り捨てた分にして、範囲内ならサーバーでも通るようにする。
-export function expiryBounds(mode, now = new Date()) {
-  const min = new Date(now.getTime() + 60000);
-  const max = new Date(now.getTime() + MAX_DAYS[mode] * 86400000);
-  return { min: localInputValue(min), max: localInputValue(max) };
-}
-
-export function qrConfirmationKey(selection, mode, expiresAt, ownerId) {
-  return JSON.stringify({ selection, mode, expiresAt, ownerId });
-}
-
-export function bindSharingPage(root, client = {
-  api, createQrShare, getUnlockState, loadAnswerDocument, openOwnedQrShare, unlock, renderQr: renderQrCanvas,
-}) {
-  if (!root.querySelector("#sharing-page")) return;
+// 共有の一覧の画面。共有リンクを作る手順は /sharing/new（sharing-new.mjs）。
+// 暗号化された回答（発行済みの共有の中身）を開くときに、その場でパスキーの本人確認を求める。
+export function bindSharingPage(root, client = { api, getUnlockState, openOwnedQrShare, unlock }) {
+  if (!root.querySelector("#sharing-page")) return Promise.resolve();
   const node = id => root.querySelector(`#${id}`);
   let catalog = { questions: [], categories: [] };
   let session = null;
-  let preview = null;
-  let generation = 0;
   let busy = false;
   let accountChanged = false;
   let decrypted = false;
-  let unlocking = false;
-  let catalogReady = false;
-  let encrypted = null;
-  let answerDocument = null;
   let detail = null;
-  let shownMode = null;
-  const answerViews = [];
   const stateLabel = { active: "有効", stopped: "停止", expired: "期限切れ", used: "使用済み" };
 
   function show(text, error = false) {
-    node("status").textContent = text;
-    node("status").classList.toggle("is-error", error);
+    notify(root, node("status"), text, error);
   }
   function isDecrypted() {
     return decrypted && !accountChanged && session?.authenticated && client.getUnlockState().unlocked;
   }
-  // 「共有する内容を確認」を押せない理由。押せるときは空文字。
-  function previewBlocker() {
-    const chosen = selection();
-    if (chosen.scope === "all" ? catalog.questions.length === 0 : chosen.ids.length === 0) {
-      return chosen.scope === "chapters" ? "共有する章を1つ以上選んでください。" : "共有する質問を1つ以上選んでください。";
-    }
-    // 日付だけ入れて時刻が空のときなど、入力の途中は value が空になる。
-    if (node("expires-at").validity?.badInput) return "有効期限の日付と時刻を最後まで入力してください。";
-    if (!node("expires-at").disabled && node("expires-at").value === "") return "有効期限を選んでください。";
-    try { settings(); } catch (error) { return error.message; }
-    return isDecrypted() ? "" : "「回答の暗号化を解除」を押すと、共有する内容を確認できます。";
-  }
-  function canPreview() {
-    return previewBlocker() === "";
-  }
   function controls() {
-    const unlocked = Boolean(isDecrypted());
-    node("share-fields").disabled = busy || unlocking || accountChanged || !session?.authenticated || !catalogReady;
-    const unlockButton = node("unlock-here");
-    unlockButton.disabled = busy || unlocking || accountChanged || unlocked;
-    unlockButton.dataset.unlockState = unlocked ? "unlocked" : "locked";
-    unlockButton.textContent = unlocked ? "解除済み" : unlocking ? "解除中…" : "回答の暗号化を解除";
-    unlockButton.setAttribute("aria-busy", String(unlocking));
-    node("sharing-unlock-help").hidden = unlocked || !session?.authenticated;
+    const loggedIn = Boolean(session?.authenticated);
+    node("share-start").disabled = busy || accountChanged || !loggedIn;
+    node("refresh-shares").disabled = busy || accountChanged || !loggedIn;
+    node("login-here").hidden = !session || loggedIn;
     node("lock-state").textContent = accountChanged ? "アカウントが変わりました。ページを開き直してください。"
       : !session ? "ログイン状態を確認しています。"
-        : !session.authenticated ? "ログインすると、回答の暗号化を解除できます。"
-          : unlocked ? `${session.display_name} さん：解除済み。回答内容を確認して共有できます。`
-            : `${session.display_name} さん：回答は暗号化されています。内容の確認と共有には解除が必要です。`;
-    const blocker = session?.authenticated && catalogReady && !accountChanged ? previewBlocker() : "";
-    node("show-preview").disabled = busy || blocker !== "";
-    node("preview-help").textContent = blocker;
-    node("preview-help").hidden = blocker === "";
-    node("refresh-shares").disabled = busy || accountChanged || !session?.authenticated;
-    node("confirm-share").disabled = !preview;
-    node("create-qr").disabled = busy || !unlocked || !preview || !node("confirm-share").checked;
+        : !loggedIn ? "ログインすると、共有リンクを作れます。"
+          : `${session.display_name} さん：暗号化された回答を開くときに、パスキーで本人確認をします。`;
     for (const button of node("qr-shares").querySelectorAll("button")) button.disabled = busy || accountChanged;
-    renderAnswers();
-  }
-  function clearPreview() {
-    generation += 1;
-    preview = null;
-    node("confirm-share").checked = false;
-    node("preview-output").replaceChildren();
-    controls();
-  }
-  function selection() {
-    const scope = root.querySelector("input[name=scope]:checked").value;
-    if (scope === "all") return { scope };
-    const group = scope === "chapters" ? "chapters" : "questions";
-    return { scope, ids: [...node(group).querySelectorAll("input:checked")].map(input => input.value) };
-  }
-  function settings() {
-    const mode = root.querySelector("input[name=mode]:checked").value;
-    let expiresAt = null;
-    if (mode in MAX_DAYS) {
-      const date = new Date(node("expires-at").value);
-      if (!Number.isFinite(date.getTime()) || date <= new Date() || date > new Date(Date.now() + MAX_DAYS[mode] * 86400000)) {
-        throw new Error(mode === "long" ? "有効期限を現在より後、3年以内に指定してください。" : "有効期限を現在より後、31日以内に指定してください。");
-      }
-      expiresAt = date.toISOString();
-    }
-    return { selection: selection(), mode, expiresAt };
-  }
-  function visibility() {
-    const scope = root.querySelector("input[name=scope]:checked").value;
-    node("chapters").hidden = scope !== "chapters";
-    node("questions").hidden = scope !== "questions";
-    node("all-answers").hidden = scope !== "all";
-    const mode = root.querySelector("input[name=mode]:checked").value;
-    const expiring = mode in MAX_DAYS;
-    node("expiry-field").hidden = !expiring;
-    node("expires-at").disabled = !expiring;
-    node("long-warning").hidden = mode !== "long";
-    if (expiring) {
-      const { min, max } = expiryBounds(mode);
-      node("expires-at").min = min;
-      node("expires-at").max = max;
-    }
-    if (mode !== shownMode) {
-      // 長期は上限の3年後を既定にする。期限付きへ戻したら選び直してもらう。
-      node("expires-at").value = mode === "long" ? longExpiryDefault() : "";
-      shownMode = mode;
-    }
-  }
-  function choice(parent, id, text) {
-    const label = root.createElement("label");
-    const input = root.createElement("input");
-    input.type = "checkbox";
-    input.value = id;
-    label.append(input, root.createTextNode(` ${text}`));
-    parent.append(label);
-    return label;
-  }
-  function answerView(parent, question, includeTitle = true) {
-    const row = root.createElement("span");
-    row.className = "sharing-answer-row";
-    if (includeTitle) {
-      const title = root.createElement("span");
-      title.className = "sharing-question-title";
-      title.textContent = question.text;
-      row.append(title);
-    }
-    const value = root.createElement("span");
-    value.className = "sharing-answer-value";
-    answerViews.push({ id: question.id, node: value });
-    row.append(value);
-    parent.append(row);
-  }
-  function renderAnswers() {
-    const unlocked = Boolean(isDecrypted());
-    for (const view of answerViews) {
-      view.node.dataset.answerState = unlocked ? "decrypted" : "encrypted";
-      if (unlocked) {
-        const answer = presentAnswer(answerDocument?.items?.[view.id]);
-        view.node.textContent = answer.stateLabel === "回答" ? `回答：${answer.valueText || "（空欄）"}` : answer.stateLabel;
-      } else {
-        view.node.textContent = !session?.authenticated ? "ログインして回答を確認"
-          : encrypted?.document === null ? "保存済みの回答はありません"
-            : encrypted ? `暗号化中：${encrypted.document.ciphertext.slice(0, 64)}…` : "回答データを確認しています…";
-      }
-    }
-  }
-  function renderCatalog() {
-    for (const category of catalog.categories) {
-      const group = root.createElement("div");
-      group.className = "sharing-chapter";
-      choice(group, category.id, category.name);
-      for (const question of catalog.questions.filter(question => question.category_id === category.id)) answerView(group, question);
-      node("chapters").append(group);
-    }
-    for (const question of catalog.questions) {
-      const label = choice(node("questions"), question.id, "");
-      answerView(label, question);
-      answerView(node("all-answers"), question);
-    }
-    catalogReady = true;
   }
   async function readSession() {
     if (accountChanged) throw new Error("アカウントが変わりました。ページを開き直してください。");
@@ -202,20 +39,12 @@ export function bindSharingPage(root, client = {
     if (session && current.user_id !== session.user_id) {
       accountChanged = true;
       decrypted = false;
-      answerDocument = null;
-      encrypted = null;
       detail?.clear();
-      clearPreview();
-      node("qr-output").hidden = true;
-      node("qr-image").replaceChildren();
-      node("share-url").value = "";
-      node("open-link").removeAttribute("href");
       node("qr-shares").replaceChildren();
+      controls();
       throw new Error("アカウントが変わりました。ページを開き直してください。");
     }
     session = current;
-    node("login-here").hidden = current.authenticated;
-    node("unlock-here").hidden = !current.authenticated;
     return current;
   }
   async function refreshShares() {
@@ -241,19 +70,16 @@ export function bindSharingPage(root, client = {
     node("qr-shares").replaceChildren(...rows);
     if (!rows.length) {
       const row = root.createElement("li");
-      row.textContent = "発行済みの共有はありません。";
+      row.textContent = "発行済みの共有はありません。「共有を開始」から作れます。";
       node("qr-shares").append(row);
     }
+    controls();
   }
   function handleError(error) {
-    if (error.code === "reauth_required" || error.status === 401) {
-      decrypted = false;
-      answerDocument = null;
-      clearPreview();
-    }
+    if (error.code === "reauth_required" || error.status === 401) decrypted = false;
     const message = ["NotAllowedError", "AbortError"].includes(error.name)
-      ? "暗号化の解除を完了できませんでした。もう一度お試しください。"
-      : error.code === "reauth_required" ? "本人確認の期限が切れました。「回答の暗号化を解除」をもう一度押してください。"
+      ? "本人確認を完了できませんでした。もう一度お試しください。"
+      : error.code === "reauth_required" ? "本人確認の期限が切れました。もう一度、パスキーで本人確認をしてください。"
         : error.message || "操作できませんでした。";
     show(message, true);
     controls();
@@ -266,98 +92,22 @@ export function bindSharingPage(root, client = {
     catch (error) { handleError(error); }
     finally { busy = false; controls(); }
   }
-  node("share-fields").addEventListener("change", event => {
-    if (event.target === node("confirm-share")) { controls(); return; }
-    // 先に期限の既定値を入れてから、ボタンを押せるか判定する。
-    visibility();
-    clearPreview();
-  });
-  node("expires-at").addEventListener("input", clearPreview);
-  // 入力の途中は value が空のままで input が起きないので、理由の表示をここで更新する。
-  node("expires-at").addEventListener("keyup", controls);
-  node("expires-at").addEventListener("blur", controls);
-  // 開いたままの画面でも、選べる範囲を今の時刻に合わせる。
-  node("expires-at").addEventListener("focus", visibility);
+  // 暗号化された回答を開くときに呼ばれる。パスキーで本人確認をして、鍵を解除する。
   async function unlockAnswers() {
     if (isDecrypted()) return;
-    unlocking = true;
-    controls();
-    show("回答の暗号化を解除しています…");
-    try {
-      await client.unlock();
-      await readSession();
-      const loaded = await client.loadAnswerDocument();
-      answerDocument = loaded.document;
-      decrypted = true;
-      show("回答の暗号化を解除しました。共有する範囲を選んでください。");
-    } finally { unlocking = false; controls(); }
+    await client.unlock();
+    await readSession();
+    decrypted = true;
   }
   detail = bindQrShareDialog(root, { client, readSession, canDecrypt: isDecrypted, unlockAnswers,
     catalog: () => catalog, modeLabel, onStopped: refreshShares, onError: handleError });
-  node("unlock-here").addEventListener("click", () => run(unlockAnswers));
-  node("show-preview").addEventListener("click", () => run(async () => {
-    clearPreview();
-    await readSession();
-    if (!isDecrypted()) throw new Error("先に「回答の暗号化を解除」を押してください。");
-    const version = generation;
-    const chosen = settings();
-    const loaded = await client.loadAnswerDocument();
-    answerDocument = loaded.document;
-    renderAnswers();
-    if (loaded.revision === 0) throw new Error("保存済みの回答がありません。先に回答画面でDBへ保存してください。");
-    const payload = plaintextForSelection(loaded.document, catalog, chosen.selection);
-    if (generation !== version) throw new Error("設定が変わったため、もう一度内容を確認してください。");
-    preview = { ...chosen, payload, key: qrConfirmationKey(chosen.selection, chosen.mode, chosen.expiresAt, session.user_id) };
-    const facts = root.createElement("p");
-    facts.textContent = `${modeLabel(chosen.mode)} / 期限 ${chosen.expiresAt ? new Date(chosen.expiresAt).toLocaleString() : "なし"}`;
-    const answers = root.createElement("div");
-    fillAnswerList(answers, entriesFromPayload(payload, catalog));
-    const parts = [facts];
-    if (chosen.mode === "long") {
-      const caution = root.createElement("p");
-      caution.className = "is-error";
-      caution.textContent = "長期リンクです。期限までは、リンクを手に入れた人なら誰でも何回でも閲覧できます。";
-      parts.push(caution);
-    }
-    node("preview-output").replaceChildren(...parts, answers);
-    show("内容と期限を確認して、確認欄にチェックしてください。");
-  }));
-  node("create-qr").addEventListener("click", () => run(async () => {
-    await readSession();
-    if (!isDecrypted()) throw new Error("先に「回答の暗号化を解除」を押してください。");
-    const chosen = settings();
-    if (!preview || !node("confirm-share").checked
-      || preview.key !== qrConfirmationKey(chosen.selection, chosen.mode, chosen.expiresAt, session.user_id)) {
-      clearPreview();
-      throw new Error("共有する内容をもう一度確認してください。");
-    }
-    const created = await client.createQrShare({ ...chosen, payload: structuredClone(preview.payload) });
-    // QRにするのは created.url だけ。画像は端末の中だけで描く。
-    node("qr-image").replaceChildren(client.renderQr(created.url, { doc: root }));
-    node("share-url").value = created.url;
-    node("open-link").href = created.url;
-    node("link-facts").textContent = `作成日時 ${created.share.created_at} / ${modeLabel(created.share.mode)}`;
-    node("qr-output").hidden = false;
-    clearPreview();
-    show("共有リンクとQRコードを作成しました。開くだけでは閲覧を開始せず、「内容を開く」で開始します。");
-    try { await refreshShares(); }
-    catch (_error) { show("共有リンクは作成済みです。一覧を更新できませんでした。表示中のリンクをコピーしてください。", true); }
-  }));
-  node("copy-link").addEventListener("click", () => run(async () => {
-    await navigator.clipboard.writeText(node("share-url").value);
-    show("共有リンクをコピーしました。");
-  }));
+  node("share-start").addEventListener("click", () => globalThis.location.assign("/sharing/new"));
   node("refresh-shares").addEventListener("click", () => run(async () => { await readSession(); await refreshShares(); }));
-  visibility();
   return run(async () => {
     await readSession();
     catalog = await client.api("/api/v1/answers/questions");
-    renderCatalog();
-    if (session.authenticated) {
-      encrypted = await client.api("/api/v1/answers/current");
-      await refreshShares();
-    }
+    if (session.authenticated) await refreshShares();
   });
 }
 
-if (typeof document !== "undefined") bindSharingPage(document);
+if (typeof document !== "undefined" && document.querySelector("#sharing-page")) bindSharingPage(document);
