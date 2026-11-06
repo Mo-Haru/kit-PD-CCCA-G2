@@ -4,20 +4,93 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/answers.css') }}">
 {% endblock %}
 {% block content %}
-  <h1>回答</h1>
-  <p><a class="demo-launch" href="{{ url_for('answers.demo') }}">テスト用の回答画面を開く</a></p>
-  <p class="note">ダミー質問6問で、入力・暗号化保存・共有を試せます。ログイン後、テスト画面で鍵を解除してください。</p>
-  <p><span class="badge">未実装</span></p>
-  <p>回答の入力・保存・閲覧は、これからこの画面に追加します。まだ保存はできません。</p>
-  <p>ブラウザ側での暗号化・復号も未実装です。サーバーが本文を読める形では受け取りません。</p>
-  <fieldset disabled>
-    <legend>回答の入力（未実装）</legend>
-    <div class="md-field md-field--raised">
-      <label class="md-field-label" for="answer-body">回答</label>
-      <textarea id="answer-body" class="md-field-control" placeholder="入力できません"></textarea>
+  {% set acp = catalog.glossary|selectattr('term', 'equalto', '人生会議（ACP）')|first %}
+  <section class="sensitive acp-answers" aria-labelledby="acp-title">
+    <h1 id="acp-title">私ノート</h1>
+    <p class="page-intro">人生会議（ACP）について、あなたが大切にしたいことを考えてみましょう。すべて任意です。</p>
+    <p class="acp-note">
+      <button id="openExplanation" class="acp-term" type="button" aria-expanded="false" aria-controls="acpExplanation">人生会議（ACP）とは？ ⓘ</button>
+      <br><small>押すと説明が表示されます。</small>
+    </p>
+    <div id="acpExplanation" class="acp-explanation" hidden>
+      <h2>ACP（人生会議）とは？</h2>
+      <p>{{ acp.description }}</p>
+      <button id="closeExplanation" type="button">閉じる</button>
     </div>
-    <button type="button">保存（未実装）</button>
-  </fieldset>
-  <p class="note">この操作は実行できません。</p>
-  <p class="note">編集場所: <code>app/blueprints/answers.py</code> と <code>app/templates/answers/</code></p>
+
+    <section class="acp-access" aria-label="回答の読み込み">
+      <p id="status" class="status-message" role="status" aria-live="polite">ログイン状態を確認しています。</p>
+      <div class="actions">
+        <a id="login-here" class="demo-launch" href="{{ url_for('auth.index', next=url_for('answers.index')) }}" hidden>ログイン・新規登録</a>
+        <button id="unlock-here" type="button" hidden>回答の暗号化を解除</button>
+      </div>
+    </section>
+
+    <form id="acp-form" method="dialog" autocomplete="off">
+      <fieldset id="acp-fields" class="acp-fields" disabled>
+        <legend class="acp-legend">人生会議（ACP）の質問</legend>
+        <div id="questionsContainer">
+          {% set choice_questions = catalog.questions|rejectattr('input_type', 'equalto', 'textarea')|list %}
+          {% for page in choice_questions|batch(catalog.page_size) %}
+            <div id="page{{ loop.index }}" class="acp-page" data-acp-page="{{ loop.index }}" {% if not loop.first %}hidden{% endif %}>
+              {% for question in page %}
+                {% set category = catalog.categories|selectattr('id', 'equalto', question.category_id)|first %}
+                {% if loop.first or question.category_id != loop.previtem.category_id %}
+                  <h2 class="acp-category">{{ catalog.categories.index(category) + 1 }}. {{ category.title }}</h2>
+                {% endif %}
+                <div class="question-card" id="q-{{ question.id }}" data-acp-question data-question-id="{{ question.id }}" data-question-title="{{ question.text }}" data-category-title="{{ category.title }}">
+                  <h3>質問 {{ question.number }}</h3>
+                  <p id="{{ question.id }}-text">{{ question.text }}</p>
+                  {% for term in question.glossary or [] %}
+                    {% set entry = catalog.glossary|selectattr('term', 'equalto', term)|first %}
+                    <button class="acp-term" type="button" aria-expanded="false" aria-controls="{{ question.id }}-note-{{ loop.index }}" data-acp-term>{{ term }}とは？</button>
+                    <p id="{{ question.id }}-note-{{ loop.index }}" class="annotation" hidden>{{ entry.description }}</p>
+                  {% endfor %}
+                  <div role="group" aria-labelledby="{{ question.id }}-text">
+                    {% for option in question.options %}
+                      <label class="answer-option">
+                        <input class="answer-checkbox" type="checkbox" name="{{ question.id }}" value="{{ option.value }}" data-answer-label="{{ option.text }}">
+                        <span>{{ option.text }}</span>
+                      </label>
+                    {% endfor %}
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          {% endfor %}
+        </div>
+
+        <div class="page-buttons">
+          <button id="prevPage" type="button" hidden>戻る</button>
+          <button id="nextPage" type="button">次へ</button>
+        </div>
+
+        {% for question in catalog.questions|selectattr('input_type', 'equalto', 'textarea') %}
+          <div class="question-card" id="freeTextArea" data-acp-question data-question-id="{{ question.id }}" data-question-title="{{ question.text }}" data-category-title="自分の考え">
+            <h2>{{ question.text }}</h2>
+            <p>{{ (catalog.categories|selectattr('id', 'equalto', question.category_id)|first).description }}</p>
+            <label class="visually-hidden" for="freeText">{{ question.label }}</label>
+            <textarea id="freeText" name="{{ question.id }}" rows="5" maxlength="{{ question.maxlength }}" placeholder="{{ question.placeholder }}"></textarea>
+          </div>
+        {% endfor %}
+
+        <div class="acp-actions">
+          <button id="saveAnswers" class="button-primary" type="button">途中保存する</button>
+          <button id="checkAnswers" type="button">回答を確認する</button>
+          <button id="resetAnswers" type="button">回答をリセットする</button>
+        </div>
+        <p id="saveMessage" class="status-message" role="status" aria-live="polite"></p>
+      </fieldset>
+    </form>
+
+    <section id="resultArea" class="acp-result" aria-labelledby="result-title" tabindex="-1" hidden>
+      <h2 id="result-title">あなたの回答</h2>
+      <div id="answerMessage"></div>
+    </section>
+
+    <p class="note">保存すると、回答はこの端末で暗号化してから保存します。サーバーやこの端末のブラウザに、回答の平文は残しません。<a href="{{ url_for('answers.note') }}">わたしノート（回答の進み具合）</a>で、回答の状況を確認できます。</p>
+    <noscript><p class="demo-notice">回答の入力にはJavaScriptを有効にしてください。</p></noscript>
+    <p class="demo-back"><a href="{{ url_for('answers.demo') }}">テスト用の回答画面（ダミー質問）</a></p>
+  </section>
+  <script type="module" src="{{ url_for('static', filename='js/watashi/answers-page.mjs') }}"></script>
 {% endblock %}

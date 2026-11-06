@@ -435,3 +435,24 @@
     transition: none;
   }
 }
+
+/* ---------------------------------------------------------------------
+   統合時の追加：アプリの共通レイアウトの中で使う部分
+   --------------------------------------------------------------------- */
+/* 「回答する」「書き直す」は回答の画面へのリンク。ボタンと同じ見た目にする */
+a.note-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+/* 未回答・暗号化中の答えは、控えめに表示する */
+.note-answer--hidden {
+  color: var(--note-muted);
+  font-weight: 400;
+}
+
+.note-access {
+  margin: 0 0 16px;
+}

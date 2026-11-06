@@ -90,3 +90,30 @@ def test_question_seed_is_idempotent_and_preserves_existing_rows(app):
         with pytest.raises(ValueError, match="一致しません"):
             seed_demo_questions()
         assert db.session.get(Question, first.id).text == "他の担当が変更した質問"
+
+
+def test_acp_question_seed_adds_questions_options_and_glossary_once(app, client):
+    from app.demo_answers import acp_catalog
+    from app.extensions import db
+    from app.models import GlossaryTerm, Question, QuestionGlossaryTerm, QuestionOption
+
+    with app.app_context():
+        db.create_all()
+        catalog = acp_catalog()
+        options = sum(len(question.get("options", [])) for question in catalog["questions"])
+        # 本番でも使う質問なので、開発・テスト専用の設定がなくても登録できる。
+        app.config["DEMO_QUESTIONS_ENABLED"] = False
+        first = app.test_cli_runner().invoke(args=["seed-questions"])
+        assert first.exit_code == 0, first.output
+        assert "22問" in first.output
+        assert db.session.query(Question).count() == 22
+        assert db.session.query(QuestionOption).count() == options == 21 * 5 + 1
+        assert {row.term for row in db.session.query(GlossaryTerm)} == {"人生会議（ACP）", "ケアマネジャー"}
+        link = db.session.query(QuestionGlossaryTerm).one()
+        assert db.session.get(Question, link.question_id).text == "生活の手助けが必要になったら、誰に相談したいですか？"
+        again = app.test_cli_runner().invoke(args=["seed-questions"])
+        assert "追加した質問・章・選択肢・用語: 0件" in again.output
+        free = db.session.get(Question, catalog["questions"][-1]["id"])
+        assert free.answer_type == "text" and free.question_key == "acp-free"
+    listed = client.get("/api/v1/answers/questions").get_json()
+    assert [question["id"] for question in listed["questions"]] == [question["id"] for question in catalog["questions"]]

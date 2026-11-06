@@ -51,6 +51,7 @@
         <nav aria-label="主要">
           <a href="{{ url_for('main.index') }}" {% if request.endpoint == 'main.index' %}aria-current="page"{% endif %}>{{ icon("home") }}<span class="nav-label">ホーム</span></a>
           <a href="{{ url_for('answers.index') }}" {% if request.endpoint in ('answers.index', 'answers.demo') %}aria-current="page"{% endif %}>{{ icon("answers") }}<span class="nav-label">回答</span></a>
+          <a href="{{ url_for('answers.note') }}" {% if request.endpoint == 'answers.note' %}aria-current="page"{% endif %}>{{ icon("note") }}<span class="nav-label">ノート</span></a>
           <a href="{{ url_for('sharing.index') }}" {% if request.endpoint in ('sharing.index', 'sharing.new') %}aria-current="page"{% endif %}>{{ icon("sharing") }}<span class="nav-label">共有</span></a>
           <a href="{{ url_for('protection_pages.family') }}" {% if request.endpoint in ('protection_pages.family', 'protection_pages.family_invite', 'protection_pages.family_share') %}aria-current="page"{% endif %}>{{ icon("family") }}<span class="nav-label">家族</span></a>
           <a href="{{ url_for('protection_pages.transfer') }}" {% if request.endpoint == 'protection_pages.transfer' %}aria-current="page"{% endif %}>{{ icon("transfer") }}<span class="nav-label">移行</span></a>

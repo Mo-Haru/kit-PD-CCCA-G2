@@ -18,7 +18,7 @@ CSP = (
     "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
     "connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
 )
-SENSITIVE_PREFIXES = ("/auth", "/account", "/answers/demo", "/sharing", "/family", "/transfer", "/view", "/api/")
+SENSITIVE_PREFIXES = ("/auth", "/account", "/answers", "/note", "/sharing", "/family", "/transfer", "/view", "/api/")
 CSRF_EXEMPT = {
     "protection_api.register_options",
     "protection_api.login_options",
@@ -58,6 +58,7 @@ def create_app(config_object=None):
 def register_blueprints(app):
     from app.blueprints.answers import bp as answers_bp
     from app.blueprints.auth import bp as auth_bp
+    from app.blueprints.line import bp as line_bp
     from app.blueprints.main import bp as main_bp
     from app.blueprints.protection_api import bp as protection_api_bp
     from app.blueprints.protection_pages import bp as protection_pages_bp
@@ -69,13 +70,18 @@ def register_blueprints(app):
     app.register_blueprint(auth_bp)
     app.register_blueprint(protection_pages_bp)
     app.register_blueprint(protection_api_bp)
+    app.register_blueprint(line_bp)
 
 
 def register_commands(app):
-    from app.demo_answers import seed_answer_demo_command
+    from app.demo_answers import seed_answer_demo_command, seed_questions_command
+    from app.services.line import line_schedule_command, line_send_command
 
     app.cli.add_command(init_db_command)
     app.cli.add_command(seed_answer_demo_command)
+    app.cli.add_command(seed_questions_command)
+    app.cli.add_command(line_send_command)
+    app.cli.add_command(line_schedule_command)
 
 
 def register_error_handlers(app):

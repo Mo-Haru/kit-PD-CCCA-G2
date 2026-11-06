@@ -20,7 +20,7 @@ VOID_TAGS = frozenset({
 MENU_SCRIPT = "/static/js/watashi/menu.mjs"
 HEADER_SCRIPT = "/static/js/watashi/header-session.mjs"
 NAV_LABELS = {
-    "/": "ホーム", "/answers": "回答", "/sharing": "共有",
+    "/": "ホーム", "/answers": "回答", "/note": "ノート", "/sharing": "共有",
     "/family": "家族", "/transfer": "移行", "/health": "起動確認",
 }
 NAV_HREFS = tuple(NAV_LABELS)
@@ -29,6 +29,7 @@ SHARED_PAGES = (
     ("/", 200, "/"),
     ("/answers", 200, "/answers"),
     ("/answers/demo", 200, "/answers"),
+    ("/note", 200, "/note"),
     ("/sharing", 200, "/sharing"),
     ("/sharing/new", 200, "/sharing"),
     ("/family", 200, "/family"),
@@ -378,6 +379,7 @@ def test_development_banner_only_on_pages_with_a_notice(client):
     ("/", "ホーム"),
     ("/answers", "回答"),
     ("/answers/demo", "回答画面のテスト"),
+    ("/note", "わたしノート"),
     ("/sharing", "共有"),
     ("/sharing/new", "共有リンクを作る"),
     ("/family", "家族共有"),

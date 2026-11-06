@@ -35,3 +35,23 @@ Playwright をプロジェクトに入れていない場合は、`npm install --
 - URL は `http://localhost:5000` のままにしてください（WebAuthn の RP ID が `localhost` のため）。別の URL で動かすときは `E2E_BASE_URL` を設定します。
 - テストのブラウザはすべて同じ接続元になるため、`e2e_app.py` で回数制限を外しています。回数制限そのものは `tests/test_abuse_limits.py` などで確かめています。
 - 受信用鍵を更新する画面はないため、鍵の更新は画面と同じ暗号関数で `POST /api/v1/encryption-keys` を呼んで行います。
+
+# 統合した機能の E2E
+
+`integration.js` は、統合した機能（回答の画面・わたしノート・QRでの共有・LINEの受信口）を通して試します（22件、1分ほど）。
+
+1. 回答の画面（`/answers`）：開くと自動で解除する、22問（2ページ）、用語の説明、1問1つの選択、途中保存、確認、開き直しでの復元、ブラウザとDBに平文が残らないこと
+2. わたしノート（`/note`）：進み具合（%）、回答日、未回答の表示、「書き直す」で回答の画面のそのページを開く
+3. QRで共有：回答の画面の回答を `/sharing/new` で共有し、QRコードが出て、別のブラウザで読めること
+4. LINEの受信口（`/line/callback`）：署名つきの確認用の要求は200、署名なし・違う署名は400（`e2e_app.py` の仮のチャネルシークレットを使う。LINEへは送信しない）
+
+```sh
+export DATABASE_URL=sqlite:////tmp/integration.db
+rm -f /tmp/integration.db
+pipenv run flask --app run init-db
+pipenv run flask --app run seed-questions
+PYTHONPATH=. pipenv run flask --app tests/e2e/e2e_app.py run --port 5000   # 別のターミナル
+E2E_DB_FILE=/tmp/integration.db node tests/e2e/integration.js /tmp/integration-out
+```
+
+`E2E_DB_FILE` を付けると、DBファイルに自由記述の回答の平文がないことも確かめます。
