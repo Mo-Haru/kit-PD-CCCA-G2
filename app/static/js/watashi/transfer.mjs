@@ -35,14 +35,48 @@ async function syncAccess() {
     : `${session.display_name} としてログイン中です。鍵は未解除です。この画面で鍵を解除してください。`;
 }
 
+const SOURCE_ENDED = {
+  finalized: "移行が完了しました。この端末のパスキーは無効になりました。",
+  cancelled: "移行は取り消されました。この端末のパスキーはそのまま使えます。",
+  expired: "移行の期限が切れました。この端末のパスキーはそのまま使えます。必要なら、もう一度開始してください。",
+};
+
+function stopSource(text) {
+  window.clearInterval(timer);
+  timer = 0;
+  sessionStorage.removeItem(SOURCE_KEY);
+  show(text);
+}
+
+// 新しい端末が完了・取消するまで、状態を見続ける。
+function watchSource() {
+  window.clearInterval(timer);
+  timer = window.setInterval(() => {
+    refreshSource().catch((error) => show(error.message, true));
+  }, 2000);
+}
+
 async function refreshSource() {
   if (!sourceId) return;
-  const migration = (await api(`/api/v1/transfer/${sourceId}`)).migration;
+  let migration;
+  try {
+    migration = (await api(`/api/v1/transfer/${sourceId}`)).migration;
+  } catch (error) {
+    // 新しい端末が完了すると、この端末のパスキーとログインは無効になり、状態を読めなくなる。
+    if (error.status === 401 && timer) {
+      document.querySelector("#source-state").textContent = "この端末のログインは終了しました";
+      stopSource("この端末のログインが終了しました。新しい端末で移行を完了した場合、この端末のパスキーは無効になっています。");
+      await syncAccess().catch(() => {});
+      return;
+    }
+    throw error;
+  }
   document.querySelector("#source-id").textContent = sourceId;
   document.querySelector("#source-state").textContent = `${migration.status} / 期限 ${migration.expires_at}`;
   document.querySelector("#source-code").textContent = migration.confirmation_code || "まだありません";
   document.querySelector("#source-fingerprint").textContent = migration.fingerprint || "まだありません";
   if (migration.status === "source_approved") await uploadBundle(migration);
+  else if (SOURCE_ENDED[migration.status]) stopSource(SOURCE_ENDED[migration.status]);
 }
 
 async function uploadBundle(migration) {
@@ -73,7 +107,6 @@ async function uploadBundle(migration) {
     body: { hpke_enc: bytesToB64url(sealed.enc), ciphertext: bytesToB64url(sealed.ciphertext) },
   });
   show("鍵束を送りました。古いパスキーは、新しい端末が復号確認と最終確定を終えるまで有効です。");
-  window.clearInterval(timer);
 }
 
 document.querySelector("#login-here").addEventListener("click", async () => {
@@ -105,10 +138,7 @@ document.querySelector("#source-start").addEventListener("click", async () => {
     sessionStorage.setItem(SOURCE_KEY, sourceId);
     document.querySelector("#source-id").textContent = sourceId;
     show("移行を開始しました。新しい端末にこのIDを入力してください。");
-    window.clearInterval(timer);
-    timer = window.setInterval(() => {
-      refreshSource().catch((error) => show(error.message, true));
-    }, 2000);
+    watchSource();
     await refreshSource();
   } catch (error) {
     show(error.message, true);
@@ -134,9 +164,7 @@ document.querySelector("#source-approve").addEventListener("click", async () => 
 document.querySelector("#source-cancel").addEventListener("click", async () => {
   try {
     await api(`/api/v1/transfer/${sourceId}/cancel`, { method: "POST", body: {} });
-    window.clearInterval(timer);
-    sessionStorage.removeItem(SOURCE_KEY);
-    show("移行を取り消しました。古いパスキーはそのまま使えます。");
+    stopSource("移行を取り消しました。古いパスキーはそのまま使えます。");
   } catch (error) {
     show(error.message, true);
   }
@@ -235,5 +263,7 @@ document.querySelector("#target-finalize").addEventListener("click", async () =>
 
 syncAccess().catch((error) => show(error.message, true));
 if (sourceId) {
+  // 開き直したときも、状態を見続ける。
+  watchSource();
   refreshSource().catch((error) => show(error.message, true));
 }

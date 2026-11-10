@@ -1109,3 +1109,11 @@ footer p {
     transition: none;
   }
 }
+
+/* ページを開いた直後（menu.mjs が data-menu-animate を付ける前）は、メニューの開閉の動きを付けない。 */
+.site-layout[data-menu-ready="true"]:not([data-menu-animate]),
+.site-layout[data-menu-ready="true"]:not([data-menu-animate]) .site-menu,
+.site-layout[data-menu-ready="true"]:not([data-menu-animate]) :is(.menu-heading, .menu-scroll, .nav-label, .menu-heading h2),
+.site-layout[data-menu-ready="true"]:not([data-menu-animate]) .site-menu nav a {
+  transition: none;
+}

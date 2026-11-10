@@ -256,6 +256,98 @@ async function lineCallback(body, signature) {
   record(S4, "署名が違う要求は400で断る", (await lineCallback(empty, "invalid")) === 400);
   record(S4, "署名のない要求は400で断る", (await lineCallback(empty, null)) === 400);
 
+  // ── 5. 回答の画面：ログインが切れたあとの保存、壊れたURL、確認の一覧 ──
+  const S5 = "5 回答の画面の例外";
+  await openAnswers(A.page, "#%E0%A4%A");
+  record(S5, "#以降が壊れたURLでも、1ページ目から入力できる",
+    !(await A.page.isDisabled("#acp-fields")) && await A.page.isVisible("#page1"), await statusText(A.page));
+  await A.page.click("#checkAnswers");
+  await choose(A.page, 3, "旅行や外出");
+  record(S5, "回答を変えると、前に出した「あなたの回答」の一覧を隠す", await A.page.isHidden("#resultArea"));
+  await A.page.fill("#freeText", "ログインが切れる前に書いた文章");
+  // 別のタブでログアウトする（セッションの期限切れと同じ状態）。
+  const other = await A.context.newPage();
+  await other.goto(`${BASE}/account`);
+  await other.waitForFunction(() => !document.querySelector("#logout").disabled && !document.querySelector("#logout").hidden);
+  await other.click("#logout");
+  await other.waitForFunction(async () => !(await (await fetch("/api/v1/auth/session")).json()).authenticated);
+  await other.close();
+  await A.page.click("#saveAnswers");
+  await A.page.waitForSelector("#unlock-here:not([hidden])", { timeout: 10000 }).catch(() => {});
+  const lost = await A.page.evaluate(() => ({
+    button: !document.querySelector("#unlock-here").hidden ? document.querySelector("#unlock-here").textContent : "",
+    message: document.querySelector("#saveMessage").textContent,
+    free: document.querySelector("#freeText").value,
+  }));
+  record(S5, "ログインが切れて保存できないとき、入力を残して本人確認のやり直しを出す",
+    lost.button.includes("もう一度本人確認") && lost.message.includes("まだ保存していません") && lost.free === "ログインが切れる前に書いた文章", JSON.stringify(lost));
+  await A.page.click("#unlock-here");
+  await A.page.waitForSelector("#unlock-here", { state: "hidden", timeout: 15000 }).catch(() => {});
+  record(S5, "この画面で本人確認をやり直せる（入力はそのまま）",
+    (await statusText(A.page)).includes("本人確認ができました") && await A.page.inputValue("#freeText") === "ログインが切れる前に書いた文章", await statusText(A.page));
+  await A.page.click("#saveAnswers");
+  await A.page.waitForFunction(() => document.querySelector("#saveMessage").textContent === "回答を保存しました。", null, { timeout: 10000 }).catch(() => {});
+  await openAnswers(A.page);
+  record(S5, "やり直したあとに保存でき、開き直しても残っている",
+    await A.page.inputValue("#freeText") === "ログインが切れる前に書いた文章", await statusText(A.page));
+
+  // ── 6. 画面を開いた直後のメニュー、端末移行の完了の表示 ──
+  const S6 = "6 メニューと端末移行";
+  await A.page.addInitScript(() => {
+    window.__menuMax = 0;
+    const started = performance.now();
+    const tick = () => {
+      const menu = document.querySelector("#site-menu");
+      if (menu && getComputedStyle(menu).position === "fixed") window.__menuMax = Math.max(window.__menuMax, menu.getBoundingClientRect().right);
+      if (performance.now() - started < 800) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  await A.page.goto(`${BASE}/sharing`);
+  await A.page.waitForTimeout(900);
+  const menuMax = await A.page.evaluate(() => Math.round(window.__menuMax));
+  record(S6, "スマートフォン幅で開いた直後に、メニューが画面を覆って閉じる動きをしない", menuMax <= 0, `メニューの右端の最大 ${menuMax}px`);
+  await A.page.goto(`${BASE}/transfer`);
+  await A.page.click("#unlock-here");
+  await A.page.waitForFunction(() => document.querySelector("#lock-state").textContent.includes("解除されています"), null, { timeout: 15000 });
+  await A.page.click("#source-start");
+  await A.page.waitForFunction(() => document.querySelector("#source-id").textContent.trim().length > 10);
+  const migrationId = (await A.page.locator("#source-id").textContent()).trim();
+  const fresh = await browser.newContext({ viewport: { width: 420, height: 1400 }, timezoneId: TIMEZONE });
+  const N = await fresh.newPage();
+  const freshCdp = await fresh.newCDPSession(N);
+  await freshCdp.send("WebAuthn.enable");
+  await freshCdp.send("WebAuthn.addVirtualAuthenticator", { options: {
+    protocol: "ctap2", ctap2Version: "ctap2_1", transport: "internal", hasResidentKey: true,
+    hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true, hasPrf: true,
+  } });
+  const waitStatus = (page, text) => page.waitForFunction(needle => document.querySelector("#status").textContent.includes(needle), text, { timeout: 20000 });
+  await N.goto(`${BASE}/transfer`);
+  await N.fill("#target-id", migrationId);
+  await N.click("#target-bind");
+  await waitStatus(N, "一致しています");
+  const code = await N.locator("#target-code").textContent();
+  await A.page.waitForFunction(expected => document.querySelector("#source-code").textContent === expected, code, { timeout: 10000 });
+  await A.page.fill("#typed-code", code);
+  await A.page.click("#source-approve");
+  await waitStatus(A.page, "鍵束を送りました");
+  await N.click("#target-finish");
+  await waitStatus(N, "新しいパスキーを登録しました");
+  await N.click("#login-here");
+  await waitStatus(N, "ログインしました");
+  await N.click("#target-confirm");
+  await waitStatus(N, "復号できました");
+  await N.click("#target-finalize");
+  await waitStatus(N, "移行を完了しました");
+  await A.page.waitForFunction(() => document.querySelector("#status").textContent.includes("ログインが終了しました")
+    || document.querySelector("#status").textContent.includes("移行が完了しました"), null, { timeout: 10000 }).catch(() => {});
+  record(S6, "新しい端末で移行を完了すると、古い端末の画面にも終了が出る",
+    /ログインが終了しました|移行が完了しました/.test(await statusText(A.page)), await statusText(A.page));
+  await N.goto(`${BASE}/answers`);
+  await N.waitForFunction(() => !document.querySelector("#acp-fields").disabled, null, { timeout: 15000 });
+  record(S6, "新しい端末で、移行前の回答を読める", await N.inputValue("#freeText") === "ログインが切れる前に書いた文章");
+  await fresh.close();
+
   record("全体", "ページのスクリプトエラーがない", A.errors.length === 0, A.errors.join(" / "));
   fs.writeFileSync(`${OUT}/results.json`, JSON.stringify(results, null, 2));
   console.log(`結果と画面の記録: ${OUT}`);
