@@ -313,6 +313,28 @@ async function lineCallback(body, signature) {
   await A.page.click("#source-start");
   await A.page.waitForFunction(() => document.querySelector("#source-id").textContent.trim().length > 10);
   const migrationId = (await A.page.locator("#source-id").textContent()).trim();
+  // 移行の途中で、通常のログアウト（期限切れと同じ401）が起きても、移行IDを失わず、ログインし直すと続きを追える。
+  const logoutTab = await A.context.newPage();
+  await logoutTab.goto(`${BASE}/account`);
+  await logoutTab.waitForFunction(() => !document.querySelector("#logout").disabled && !document.querySelector("#logout").hidden);
+  await logoutTab.click("#logout");
+  await logoutTab.waitForFunction(async () => !(await (await fetch("/api/v1/auth/session")).json()).authenticated);
+  await logoutTab.close();
+  await A.page.waitForFunction(() => document.querySelector("#status").textContent.includes("ログインが終了しました"), null, { timeout: 10000 }).catch(() => {});
+  const paused = await A.page.evaluate(() => ({ kept: sessionStorage.getItem("wn-transfer-source"), status: document.querySelector("#status").textContent }));
+  record(S6, "移行の途中でログインが切れても、移行IDを残し、ログインし直す案内を出す",
+    paused.kept === migrationId && paused.status.includes("ログインし直して"), JSON.stringify(paused).slice(0, 160));
+  await A.page.reload();
+  await A.page.waitForFunction(() => document.querySelector("#status").textContent.includes("ログインが終了しました"), null, { timeout: 10000 }).catch(() => {});
+  record(S6, "ログインが切れたまま開き直しても、移行IDが残っている",
+    await A.page.evaluate(() => sessionStorage.getItem("wn-transfer-source")) === migrationId);
+  await A.page.click("#login-here");
+  await A.page.waitForFunction(() => document.querySelector("#status").textContent.includes("ログインしました"), null, { timeout: 15000 }).catch(() => {});
+  record(S6, "ログインし直すと、鍵を解除すれば続きを確認できると案内する", (await statusText(A.page)).includes("進行中の移行の続き"), await statusText(A.page));
+  await A.page.click("#unlock-here");
+  await A.page.waitForFunction(() => document.querySelector("#source-state").textContent.includes("started"), null, { timeout: 15000 }).catch(() => {});
+  record(S6, "鍵を解除すると、進行中の移行の状態をまた確認できる",
+    (await A.page.locator("#source-state").textContent()).includes("started"), `${await A.page.locator("#source-state").textContent()} / ${await statusText(A.page)}`);
   const fresh = await browser.newContext({ viewport: { width: 420, height: 1400 }, timezoneId: TIMEZONE });
   const N = await fresh.newPage();
   const freshCdp = await fresh.newCDPSession(N);

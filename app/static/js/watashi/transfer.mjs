@@ -56,16 +56,26 @@ function watchSource() {
   }, 2000);
 }
 
+// ログインし直したあと、進行中の移行があれば、状態を見るのを再開する。
+async function resumeSource() {
+  if (!sourceId || !sessionStorage.getItem(SOURCE_KEY)) return;
+  if (!timer) watchSource();
+  await refreshSource();
+}
+
 async function refreshSource() {
   if (!sourceId) return;
   let migration;
   try {
     migration = (await api(`/api/v1/transfer/${sourceId}`)).migration;
   } catch (error) {
-    // 新しい端末が完了すると、この端末のパスキーとログインは無効になり、状態を読めなくなる。
+    // ログインが切れると状態を読めない。新しい端末が完了した場合も、通常のログアウトや期限切れの場合も同じ401になる。
+    // どちらか区別できないので、移行IDは残して見るのを止め、ログインし直したら再開する（完了・取消・期限切れを確認できたときだけIDを消す）。
     if (error.status === 401 && timer) {
-      document.querySelector("#source-state").textContent = "この端末のログインは終了しました";
-      stopSource("この端末のログインが終了しました。新しい端末で移行を完了した場合、この端末のパスキーは無効になっています。");
+      window.clearInterval(timer);
+      timer = 0;
+      document.querySelector("#source-state").textContent = "ログインが切れたため、状態を確認できません";
+      show("この端末のログインが終了しました。新しい端末で移行を完了した場合、この端末のパスキーは無効になっています。まだ完了していない場合は、この画面でログインし直して鍵を解除すると、続きを確認できます。");
       await syncAccess().catch(() => {});
       return;
     }
@@ -113,8 +123,11 @@ document.querySelector("#login-here").addEventListener("click", async () => {
   try {
     await login();
     decryptConfirmed = false;
-    show("ログインしました。鍵はまだ解除されていません。");
     await syncAccess();
+    // 移行の状態を読むには、ログインに加えて鍵の解除（本人確認）が要る。
+    show(sourceId && sessionStorage.getItem(SOURCE_KEY)
+      ? "ログインしました。「この画面で鍵を解除」を押すと、進行中の移行の続きを確認できます。"
+      : "ログインしました。鍵はまだ解除されていません。");
   } catch (error) {
     show(error.message || "ログインできませんでした。", true);
   }
@@ -125,7 +138,7 @@ document.querySelector("#unlock-here").addEventListener("click", async () => {
     await unlock();
     show("この画面で鍵を解除しました。");
     await syncAccess();
-    await refreshSource();
+    await resumeSource();
   } catch (error) {
     show(error.message || "鍵を解除できませんでした。鍵は使える状態にしていません。", true);
   }
