@@ -73,6 +73,7 @@ export function bindAnswersPage(root, api = client) {
   // 保存済みでも、この画面の選択肢にない回答。保存のときは、元の値を残す。
   let kept = {};
   let previous = {};
+  const unlockLabel = node("unlock-here").textContent;
 
   function show(text, error = false) { notify(root, node("status"), text, error); }
   function saved(text) { node("saveMessage").textContent = text; }
@@ -101,7 +102,33 @@ export function bindAnswersPage(root, api = client) {
           ? "暗号化の解除を完了できませんでした。「回答の暗号化を解除」でもう一度お試しください。"
           : error.message || "処理できませんでした。入力は保存していません。";
       show(message, true);
+      await offerRecovery();
     } finally { busy = false; sync(); }
+  }
+  // 回答を読み込んだあとでログインや解除が切れたとき、入力を残したまま、この画面で本人確認をやり直せるようにする。
+  async function accessLost() {
+    if (!ready) return false;
+    try {
+      const session = await api.api("/api/v1/auth/session");
+      return !session.authenticated || !api.getUnlockState().unlocked;
+    } catch { return false; }
+  }
+  async function offerRecovery() {
+    if (!await accessLost()) return;
+    node("unlock-here").textContent = "もう一度本人確認して、入力を保存できるようにする";
+    node("unlock-here").hidden = false;
+    saved("まだ保存していません。入力は画面に残っています。上の「もう一度本人確認して、入力を保存できるようにする」を押してください。");
+  }
+  // 入力は読み直さない。別のアカウントでログインした場合は、保存のときに断る（answer-demo-store.mjs）。
+  async function recoverAccess() {
+    show("本人確認をしています…");
+    const session = await api.api("/api/v1/auth/session");
+    if (!session.authenticated) await api.login();
+    await api.unlock();
+    node("unlock-here").hidden = true;
+    node("unlock-here").textContent = unlockLabel;
+    saved("");
+    show("本人確認ができました。入力は残っています。「途中保存する」を押して保存してください。");
   }
   async function load() {
     ready = false;
@@ -128,6 +155,13 @@ export function bindAnswersPage(root, api = client) {
     await load();
   }
 
+  // 回答を変えたら、前に出した「あなたの回答」の一覧は古くなるので隠す。
+  function changed() {
+    dirty = true;
+    saved("");
+    node("resultArea").hidden = true;
+    sync();
+  }
   for (const box of root.querySelectorAll(".answer-checkbox")) {
     box.addEventListener("change", () => {
       if (box.checked) {
@@ -136,12 +170,10 @@ export function bindAnswersPage(root, api = client) {
         }
       }
       delete kept[box.name];
-      dirty = true;
-      saved("");
-      sync();
+      changed();
     });
   }
-  node("freeText")?.addEventListener("input", () => { dirty = true; saved(""); sync(); });
+  node("freeText")?.addEventListener("input", changed);
   for (const term of root.querySelectorAll("[data-acp-term]")) {
     term.addEventListener("click", () => {
       const note = node(term.getAttribute("aria-controls"));
@@ -160,11 +192,13 @@ export function bindAnswersPage(root, api = client) {
   });
   node("nextPage").addEventListener("click", () => showPage(Math.min(page + 1, pages.length - 1), { scroll: true }));
   node("prevPage").addEventListener("click", () => showPage(Math.max(page - 1, 0), { scroll: true }));
-  node("unlock-here").addEventListener("click", () => run(unlockAndLoad));
+  node("unlock-here").addEventListener("click", () => run(ready ? recoverAccess : unlockAndLoad));
   node("saveAnswers").addEventListener("click", () => run(async () => {
     saved("回答を暗号化して保存しています…");
     const items = { ...kept, ...readAnswers(root, previous) };
-    const result = await store.save(items);
+    let result;
+    try { result = await store.save(items); }
+    catch (error) { saved("保存できませんでした。入力は画面に残っています。"); throw error; }
     previous = items;
     dirty = false;
     saved("回答を保存しました。");
@@ -201,7 +235,12 @@ export function bindAnswersPage(root, api = client) {
   });
 
   // わたしノートの「書き直す」から来たときは、その質問のあるページを開く。
-  const target = root.defaultView?.location?.hash ? root.getElementById(decodeURIComponent(root.defaultView.location.hash.slice(1))) : null;
+  // #以降が壊れたURL（途中で切れたリンクなど）でも、画面は1ページ目から使えるようにする。
+  let target = null;
+  try {
+    const hash = root.defaultView?.location?.hash || "";
+    target = hash ? root.getElementById(decodeURIComponent(hash.slice(1))) : null;
+  } catch { target = null; }
   const targetPage = target ? pages.findIndex(element => element.contains(target)) : -1;
   showPage(Math.max(targetPage, 0));
   target?.scrollIntoView?.({ block: "start" });

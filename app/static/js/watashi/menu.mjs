@@ -124,5 +124,7 @@ if (toggle && menu && layout && closeButton && backdrop) {
     }
   });
   render();
+  // 最初の表示では動きを付けない。先に描かれた画面から、メニューが閉じる動きが見えてしまうため。
+  window.requestAnimationFrame(() => window.requestAnimationFrame(() => { layout.dataset.menuAnimate = "true"; }));
   document.body.classList.add("has-fixed-layout");
 }

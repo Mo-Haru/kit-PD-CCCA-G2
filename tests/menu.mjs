@@ -186,6 +186,9 @@ async function scenario({ wide = true, missing = [], stored, storage = "ok" } = 
   } else {
     window.localStorage = { getItem: (key) => saved.get(key) ?? null, setItem: (key, value) => { saved.set(key, value); } };
   }
+  // 描画の順番待ち。frames() で、たまった分を順に進める。
+  const frames = [];
+  window.requestAnimationFrame = (callback) => frames.push(callback);
   const context = createContext({ document, window });
   const entry = new SourceTextModule(source, { context, identifier: sourceUrl.href });
   await entry.link((specifier) => assert.fail(`Unexpected menu dependency: ${specifier}`));
@@ -194,6 +197,7 @@ async function scenario({ wide = true, missing = [], stored, storage = "ok" } = 
     document, window, media, mediaQueries, saved, toggle, menu, layout, close, backdrop,
     accountLink, menuAccountLink, title, links, linkLabel, outside,
     background: [skip, header, content].filter((element) => document.documentElement.contains(element)),
+    frames() { while (frames.length) frames.shift()(); },
     setWide(value) {
       if (media.matches === value) return;
       media.matches = value;
@@ -235,6 +239,15 @@ function openDrawer(page) {
   assertState(page, true);
   assertFocused(page, page.close);
 }
+
+await test("the first render is not animated; later toggles are", async () => {
+  // 先に描かれた画面から、メニューが閉じる動きが見えないようにする（style.css が data-menu-animate を見る）。
+  const page = await scenario({ wide: false });
+  assert.equal(page.layout.dataset.menuReady, "true");
+  assert.equal(page.layout.dataset.menuAnimate, undefined);
+  page.frames();
+  assert.equal(page.layout.dataset.menuAnimate, "true");
+});
 
 await test("desktop starts expanded and toggles without modal side effects", async () => {
   const page = await scenario();
